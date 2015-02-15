@@ -1,0 +1,11 @@
+{
+	"name": "vibe-dav",
+	"description": "Dav support for vibe.d",
+	"copyright": "Copyright © 2015, Szabo Bogdan",
+	"authors": ["Szabo Bogdan"],
+	"dependencies": {
+		"vibe-d": "~>0.7.19"
+	},
+
+	"targetType": "library"
+}

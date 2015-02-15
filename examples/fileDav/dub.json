@@ -1,0 +1,14 @@
+{
+	"name": "filedav",
+	"description": "A simple vibe.d server application.",
+	"copyright": "Copyright © 2015, gedaiu",
+	"authors": ["gedaiu"],
+	"dependencies": {
+		"vibe-d": "~>0.7.19",
+		"vibe-dav": {
+			"version": ">=0.0.1",
+			"path": "../.."
+		}
+	},
+	"versions": ["VibeDefaultMain"]
+}

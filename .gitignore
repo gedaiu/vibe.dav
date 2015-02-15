@@ -5,3 +5,5 @@ __dummy.html
 *.obj
 
 *.a
+
+dub.selections.json

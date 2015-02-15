@@ -5,7 +5,8 @@
 	"authors": ["Szabo Bogdan"],
 	"license": "MIT",
 	"dependencies": {
-		"vibe-d": "~>0.7.19"
+		"vibe-d": "~>0.7.19",
+		"kxml": "~>1.0.0"
 	},
 
 	"targetType": "library"

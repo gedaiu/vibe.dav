@@ -408,8 +408,6 @@ final class DavFileResource : DavResource {
 	override void copy(URL destinationURL, bool overwrite = false) {
 		string destinationPath = (fileRoot ~ destinationURL.path.toString[1..$]).toString.decode;
 
-		writeln("COPY: ", destinationPath);
-
 		if(!overwrite && destinationPath.exists)
 			throw new DavException(HTTPStatus.preconditionFailed, "Destination already exists.");
 
@@ -616,12 +614,7 @@ abstract class Dav {
 	void put(HTTPServerRequest req, HTTPServerResponse res) {
 		string path = getRequestPath(req);
 
-		writeln("PUT ", path);
-		writeln("PUT ", req.headers);
-
 		DavResource resource = getOrCreateResource(req.fullURL, res.statusCode);
-
-		writeln("resource ", resource);
 
 		auto content = req.bodyReader.readAll;
 		resource.setContent(content);
@@ -652,8 +645,11 @@ abstract class Dav {
 		string path = getRequestPath(req);
 
 		res.statusCode = HTTPStatus.noContent;
-		auto selectedResource = getResource(req.fullURL);
-		selectedResource.remove();
+
+		if(req.fullURL.anchor != "" || req.requestURL.indexOf("#") != -1)
+			throw new DavException(HTTPStatus.conflict, "Missing parent");
+
+		getResource(req.fullURL).remove();
 
 		res.writeBody("", "text/plain");
 	}
@@ -719,9 +715,6 @@ HTTPServerRequestDelegate serveDav(T : Dav)(Path path) {
 	void callback(HTTPServerRequest req, HTTPServerResponse res)
 	{
 		try {
-
-			writeln("==> GOT: ", req.method, " ", req.path);
-
 			if(req.method == HTTPMethod.OPTIONS) {
 				dav.options(req, res);
 			} else if(req.method == HTTPMethod.PROPFIND) {

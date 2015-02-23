@@ -279,8 +279,8 @@ class DavResource {
 
 	abstract DavResource[] getChildren(ulong depth = 1);
 	abstract void remove();
-	abstract void move(URL newPath, bool overwrite = false);
-	abstract void copy(URL destinationURL, bool overwrite = false);
+	abstract HTTPStatus move(URL newPath, bool overwrite = false);
+	abstract HTTPStatus copy(URL destinationURL, bool overwrite = false);
 	abstract void setContent(const ubyte[] content);
 }
 
@@ -383,13 +383,13 @@ final class DavFileResource : DavResource {
 		auto dav = new FileDav();
 		dav.root = Path("");
 
-		auto file = dav.getResource(Path("/level1"));
+		auto file = dav.getResource(URL("http://127.0.0.1/level1"));
 		file.remove;
 
 		assert(!"level1".exists);
 	}
 
-	override void move(URL destinationUrl, bool overwrite = false) {
+	override HTTPStatus move(URL destinationUrl, bool overwrite = false) {
 		Path urlPath = destinationUrl.pathString;
 		Path destinationPath = fileRoot ~ urlPath.toString.decode[1..$];
 
@@ -401,28 +401,49 @@ final class DavFileResource : DavResource {
 		if(!overwrite && parentResource.hasChild(urlPath))
 			throw new DavException(HTTPStatus.preconditionFailed, "Destination already exists.");
 
-		copy(destinationUrl, overwrite);
+		auto retStatus = copy(destinationUrl, overwrite);
 		remove;
+
+		return retStatus;
 	}
 
-	override void copy(URL destinationURL, bool overwrite = false) {
-		string destinationPath = (fileRoot ~ destinationURL.path.toString[1..$]).toString.decode;
+	override HTTPStatus copy(URL destinationURL, bool overwrite = false) {
+		HTTPStatus retCode = HTTPStatus.created;
+
+		auto destinationPathObj = (fileRoot ~ destinationURL.path.toString[1..$]);
+		destinationPathObj.endsWithSlash = false;
+
+		string destinationPath = destinationPathObj.toString.decode;
+		string sourcePath = filePath.toString;
 
 		if(!overwrite && destinationPath.exists)
 			throw new DavException(HTTPStatus.preconditionFailed, "Destination already exists.");
 
 		if(isCollection) {
+			if(destinationPath.exists && !destinationPath.isDir) destinationPath.remove;
+
 			destinationPath.mkdirRecurse;
 
 			auto childList = getChildren;
 			foreach(c; childList) {
 				URL childURL = destinationURL;
 				childURL.path = destinationURL.path ~ c.name;
-				c.copy(childURL);
+				c.copy(childURL, overwrite);
 			}
 		} else {
-			filePath.toString.copy(destinationPath);
+			string parentPath = Path(destinationPath).parentPath.toString;
+			if(parentPath != "" && !parentPath.exists)
+				throw new DavException(HTTPStatus.conflict, "Conflict. `" ~ parentPath ~ "` does not exist.");
+
+			if(destinationPath.exists && destinationPath.isDir != sourcePath.isDir) {
+				auto destinationResource = dav.getResource(destinationURL);
+				destinationResource.remove;
+				retCode = HTTPStatus.noContent;
+			}
+			sourcePath.copy(destinationPath);
 		}
+
+		return retCode;
 	}
 
 	unittest {
@@ -431,8 +452,9 @@ final class DavFileResource : DavResource {
 		auto dav = new FileDav();
 		dav.root = Path("");
 
-		auto file = dav.getResource(Path("/testFile.txt"));
-		file.copy(Path("/testCopy.txt"));
+		auto file = dav.getResource(URL("http://127.0.0.1/testFile.txt"));
+		if("testCopy.txt".exists) "testCopy.txt".remove;
+		file.copy(URL("http://127.0.0.1/testCopy.txt"), true);
 
 		assert("hello!" == "testCopy.txt".read);
 
@@ -447,8 +469,8 @@ final class DavFileResource : DavResource {
 		auto dav = new FileDav();
 		dav.root = Path("");
 
-		auto file = dav.getResource(Path("/level1"));
-		file.copy(Path("/_test"));
+		auto file = dav.getResource(URL("http://127.0.0.1/level1"));
+		file.copy(URL("http://127.0.0.1/_test"));
 
 		assert("hello!" == "_test/level2/testFile.txt".read);
 
@@ -657,13 +679,25 @@ abstract class Dav {
 	void move(HTTPServerRequest req, HTTPServerResponse res) {
 		string path = getRequestPath(req);
 
-		res.statusCode = HTTPStatus.noContent;
 		auto selectedResource = getResource(req.fullURL);
 
 		string destination = getHeader!"Destination"(req.headers);
 		string overwrite = getHeader!"Overwrite"(req.headers);
 
-		selectedResource.move(URL(destination));
+		res.statusCode = selectedResource.move(URL(destination), overwrite == "T");
+
+		res.writeBody("", "text/plain");
+	}
+
+	void copy(HTTPServerRequest req, HTTPServerResponse res) {
+		string path = getRequestPath(req);
+
+		auto selectedResource = getResource(req.fullURL);
+
+		string destination = getHeader!"Destination"(req.headers);
+		string overwrite = getHeader!"Overwrite"(req.headers);
+
+		res.statusCode = selectedResource.copy(URL(destination), overwrite == "T");
 
 		res.writeBody("", "text/plain");
 	}
@@ -729,6 +763,8 @@ HTTPServerRequestDelegate serveDav(T : Dav)(Path path) {
 				dav.mkcol(req, res);
 			} else if(req.method == HTTPMethod.DELETE) {
 				dav.remove(req, res);
+			} else if(req.method == HTTPMethod.COPY) {
+				dav.copy(req, res);
 			} else if(req.method == HTTPMethod.MOVE) {
 				dav.move(req, res);
 			} else {

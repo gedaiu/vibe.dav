@@ -4,10 +4,10 @@
  * License: Subject to the	 terms of the MIT license, as written in the included LICENSE.txt file.
  * Copyright: Public Domain
  */
-
 module vibedav.base;
 
 public import vibedav.util;
+public import vibedav.prop;
 
 import vibe.core.log;
 import vibe.core.file;
@@ -19,9 +19,8 @@ import vibe.http.router : URLRouter;
 import vibe.stream.operations;
 import vibe.utils.dictionarylist;
 
-import kxml.xml;
-
 import std.conv : to;
+import std.algorithm;
 import std.file;
 import std.path;
 import std.digest.md;
@@ -135,13 +134,13 @@ class DavLockInfo {
 	string token;
 	DavDepth depth;
 
-	static DavLockInfo fromXML(XmlNode node) {
+	static DavLockInfo fromXML(DavProp node) {
 		auto lock = new DavLockInfo;
-
-		XmlNode[] xmlSharedScope = node.parseXPath("d:lockinfo/d:lockscope/d:shared");
-		XmlNode[] xmlExclusiveScope = node.parseXPath("d:lockinfo/d:lockscope/d:exclusive");
-		XmlNode[] xmlWriteType = node.parseXPath("d:lockinfo/d:locktype/d:write");
-		XmlNode[] xmlOwner = node.parseXPath("d:lockinfo/d:owner/d:href");
+		/*
+		XmlNode[] xmlSharedScope = node.parseXPath("d:lockinfo/d:lockscope/d:shared") ~ node.parseXPath("lockinfo/lockscope/shared");
+		XmlNode[] xmlExclusiveScope = node.parseXPath("d:lockinfo/d:lockscope/d:exclusive") ~ node.parseXPath("lockinfo/lockscope/exclusive");
+		XmlNode[] xmlWriteType = node.parseXPath("d:lockinfo/d:locktype/d:write") ~ node.parseXPath("lockinfo/locktype/write");
+		XmlNode[] xmlOwner = node.parseXPath("d:lockinfo/d:owner/d:href") ~ node.parseXPath("lockinfo/owner/href");
 
 		if(xmlSharedScope.length == 1)
 			lock.scopeLock = Scope.sharedLock;
@@ -158,7 +157,7 @@ class DavLockInfo {
 		if(xmlOwner.length == 1)
 			lock.owner = xmlOwner[0].getInnerXML;
 
-		lock.token = randomUUID.toString;
+		lock.token = randomUUID.toString;*/
 
 		return lock;
 	}
@@ -221,16 +220,28 @@ class DavLockInfo {
 class DavResource {
 	string href;
 	URL url;
-	string[string] properties;
+
+	DavProp properties;
+
 	HTTPStatus statusCode;
 	bool isCollection;
 
-
-	private Dav dav;
+	protected {
+		Dav dav;
+	}
 
 	this(Dav dav, URL url) {
 		this.dav = dav;
 		this.url = url;
+
+		string strUrl = url.toString;
+
+		if(strUrl !in dav.resourcePropStorage) {
+			dav.resourcePropStorage[strUrl] = new DavProp;
+			dav.resourcePropStorage[strUrl].addNamespace("d", "DAV:");
+		}
+
+		this.properties = dav.resourcePropStorage[strUrl];
 	}
 
 	@property
@@ -250,8 +261,14 @@ class DavResource {
 		foreach(key, val; properties) {
 			auto key1 = key.toLower;
 
-			if(props.length == 0 || props.length > 0 && (key1 in props) !is null)
-				str ~= `<` ~ key ~ `>` ~ val ~ `</` ~ key ~ `>`;
+			writeln("is ", key1, " in ", props, " ", key1 in props);
+
+			bool add = true;
+			if(props.length > 0 && (key1 in props) is null)
+				add = false;
+
+			if(add)
+				str ~= val.toString;
 		}
 
 		if(props.length == 0 || (props.length > 0 && ("d:resourcetype" in props) !is null)) {
@@ -262,7 +279,7 @@ class DavResource {
 		}
 
 		str ~= `</d:prop></d:propstat>`;
-		str ~= `<d:status>HTTP/1.1 ` ~ statusCode.to!string ~ ` ` ~ httpStatusText(statusCode) ~ `</d:status>`;
+		str ~= `<d:status>HTTP/1.1 ` ~ statusCode.to!int.to!string ~ ` ` ~ httpStatusText(statusCode) ~ `</d:status>`;
 
 		return str;
 	}
@@ -277,212 +294,106 @@ class DavResource {
 		return false;
 	}
 
+	string propPatch(string content) {
+		string description;
+		string result = `<?xml version="1.0" encoding="utf-8" ?><d:multistatus xmlns:d="DAV:"><d:response>`;
+		result ~= `<d:href>` ~ url.toString ~ `</d:href>`;
+
+		auto document = parseXMLProp(content);
+
+		//set properties
+		auto setList = [document].getTagChilds("propertyupdate")
+								 .getTagChilds("set")
+								 .getTagChilds("prop");
+
+		foreach(prop; setList) {
+			foreach(string key, p; prop) {
+				writeln("=>", key);
+				properties[key] = p;
+				result ~= `<d:propstat><d:prop>` ~ p.toString ~ `</d:prop>`;
+				HTTPStatus status = HTTPStatus.ok;
+				result ~= `<d:status>HTTP/1.1 ` ~ status.to!int.to!string ~ ` ` ~ status.to!string ~ `</d:status></d:propstat>`;
+			}
+		}
+
+		/*
+		//remove properties
+		XmlNode[] removeList = document.parseXPath("d:propertyupdate/d:remove/d:prop") ~ document.parseXPath("propertyupdate/remove/prop");
+
+		foreach(prop; removeList) {
+			auto properties = prop.getChildren;
+
+			foreach(p; properties) {
+				string tagName = p.getName;
+				string namespace = "";
+
+				if(p.hasAttribute("xmlns"))
+					namespace = p.getAttribute("xmlns");
+
+				DavProp resProp;
+				HTTPStatus status = HTTPStatus.ok;
+
+				if(tagName in this.properties) {
+					resProp = this.properties[tagName];
+					resProp.value = "";
+				} else {
+					resProp = new DavProp(tagName, namespace);
+					status = HTTPStatus.notFound;
+				}
+
+				//result ~= `<d:propstat><D:prop>` ~ resProp.toTag(tagName) ~ `</d:prop>`;
+
+				try removeProp(tagName);
+				catch (DavException e) {
+					status = e.status;
+					description ~= e.msg;
+				}
+
+				result ~= `<d:status>HTTP/1.1 ` ~ status.to!int.to!string ~ ` ` ~
+								status.to!string ~ `</d:status></d:propstat>`;
+			}
+		}*/
+
+		if(description != "")
+			result ~= `<d:responsedescription>` ~ description ~ `</d:responsedescription>`;
+
+		result ~= `</d:response></d:multistatus>`;
+
+		string strUrl = url.toString;
+		dav.resourcePropStorage[strUrl] = properties;
+
+		return result;
+	}
+
+	void setProp(string name, DavProp prop) {
+		properties[name] = prop;
+		dav.resourcePropStorage[url.toString][name] = prop;
+	}
+
+	void removeProp(string name) {
+		string urlStr = url.toString;
+
+		if(name in properties) properties.remove(name);
+		if(name in dav.resourcePropStorage[urlStr]) dav.resourcePropStorage[urlStr].remove(name);
+	}
+
+
+	void remove() {
+		string strUrl = url.toString;
+
+		if(strUrl in dav.resourcePropStorage)
+			dav.resourcePropStorage.remove(strUrl);
+	}
+
+	HTTPStatus copy(URL destinationURL, bool overwrite = false) {
+		dav.resourcePropStorage[destinationURL.toString] = dav.resourcePropStorage[url.toString];
+
+		return HTTPStatus.ok;
+	}
+
 	abstract DavResource[] getChildren(ulong depth = 1);
-	abstract void remove();
 	abstract HTTPStatus move(URL newPath, bool overwrite = false);
-	abstract HTTPStatus copy(URL destinationURL, bool overwrite = false);
 	abstract void setContent(const ubyte[] content);
-}
-
-/// Represents a file or directory DAV resource
-final class DavFileResource : DavResource {
-	private immutable {
-		Path resPath;
-		Path fileRoot;
-		Path filePath;
-	}
-
-	this(Dav dav, Path root, URL url) {
-		super(dav, url);
-
-		auto path = url.path;
-
-		path.normalize;
-		root.normalize;
-
-		logTrace("create DAV file resource %s %s", root , path);
-
-		resPath = path;
-		fileRoot = root;
-		filePath = root ~ path.toString[1..$];
-
-		FileInfo dirent;
-		auto pathstr = filePath.toNativeString();
-
-		try dirent = getFileInfo(pathstr);
-		catch(Exception) {
-			throw new HTTPStatusException(HTTPStatus.InternalServerError,
-				"Failed to get information for the file due to a file system error.");
-		}
-
-		auto lastModified = toRFC822DateTimeString(dirent.timeModified.toUTC());
-		auto creationDate = toRFC822DateTimeString(dirent.timeCreated.toUTC());
-		isCollection = pathstr.isDir;
-
-		auto etag = "\"" ~ hexDigest!MD5(pathstr ~ ":" ~ lastModified ~ ":" ~ to!string(dirent.size)).idup ~ "\"";
-
-		string resType = "";
-		properties["d:getetag"] = etag[1..$-1];
-		properties["d:getlastmodified"] = lastModified;
-		properties["d:creationdate"] = creationDate;
-
-		if(!isCollection) {
-			properties["d:getcontentlength"] = dirent.size.to!string;
-			properties["d:getcontenttype"] = getMimeTypeForFile(pathstr);
-		}
-
-		href = path.toString;
-
-		statusCode = HTTPStatus.OK;
-	}
-
-	override DavResource[] getChildren(ulong depth = 1) {
-		DavResource[] list;
-
-		if(depth == 0) return list;
-		string listPath = filePath.toString.decode;
-		string rootPath = fileRoot.toString.decode;
-
-		auto fileList = dirEntries( listPath, "*", SpanMode.shallow);
-
-		foreach(file; fileList) {
-			string fileName = baseName(file.name);
-
-			URL childUrl = url;
-			childUrl.path = childUrl.path ~ fileName;
-
-	   		auto resource = new DavFileResource(dav, fileRoot, childUrl);
-
-	   		list ~= resource;
-
-	   		if(resource.isCollection && depth > 0)
-	   			list ~= resource.getChildren(depth - 1);
-		}
-
-		return list;
-	}
-
-	override void remove() {
-		if(isCollection) {
-			auto childList = getChildren;
-
-			foreach(c; childList)
-				c.remove;
-
-			filePath.toString.rmdir;
-		} else {
-			filePath.toString.remove;
-		}
-	}
-
-	unittest {
-		"level1/level2".mkdirRecurse;
-		"level1/level2/testFile1.txt".write("hello!");
-		"level1/level2/testFile2.txt".write("hello!");
-
-		auto dav = new FileDav();
-		dav.root = Path("");
-
-		auto file = dav.getResource(URL("http://127.0.0.1/level1"));
-		file.remove;
-
-		assert(!"level1".exists);
-	}
-
-	override HTTPStatus move(URL destinationUrl, bool overwrite = false) {
-		Path urlPath = destinationUrl.pathString;
-		Path destinationPath = fileRoot ~ urlPath.toString.decode[1..$];
-
-		auto parentResource = dav.getResource(url.parentURL);
-
-		if(destinationPath == filePath)
-			throw new DavException(HTTPStatus.forbidden, "Destination same as source.");
-
-		if(!overwrite && parentResource.hasChild(urlPath))
-			throw new DavException(HTTPStatus.preconditionFailed, "Destination already exists.");
-
-		auto retStatus = copy(destinationUrl, overwrite);
-		remove;
-
-		return retStatus;
-	}
-
-	override HTTPStatus copy(URL destinationURL, bool overwrite = false) {
-		HTTPStatus retCode = HTTPStatus.created;
-
-		auto destinationPathObj = (fileRoot ~ destinationURL.path.toString[1..$]);
-		destinationPathObj.endsWithSlash = false;
-
-		string destinationPath = destinationPathObj.toString.decode;
-		string sourcePath = filePath.toString;
-
-		if(!overwrite && destinationPath.exists)
-			throw new DavException(HTTPStatus.preconditionFailed, "Destination already exists.");
-
-		if(isCollection) {
-			if(destinationPath.exists && !destinationPath.isDir) destinationPath.remove;
-
-			destinationPath.mkdirRecurse;
-
-			auto childList = getChildren;
-			foreach(c; childList) {
-				URL childURL = destinationURL;
-				childURL.path = destinationURL.path ~ c.name;
-				c.copy(childURL, overwrite);
-			}
-		} else {
-			string parentPath = Path(destinationPath).parentPath.toString;
-			if(parentPath != "" && !parentPath.exists)
-				throw new DavException(HTTPStatus.conflict, "Conflict. `" ~ parentPath ~ "` does not exist.");
-
-			if(destinationPath.exists && destinationPath.isDir != sourcePath.isDir) {
-				auto destinationResource = dav.getResource(destinationURL);
-				destinationResource.remove;
-				retCode = HTTPStatus.noContent;
-			}
-			sourcePath.copy(destinationPath);
-		}
-
-		return retCode;
-	}
-
-	unittest {
-		"testFile.txt".write("hello!");
-
-		auto dav = new FileDav();
-		dav.root = Path("");
-
-		auto file = dav.getResource(URL("http://127.0.0.1/testFile.txt"));
-		if("testCopy.txt".exists) "testCopy.txt".remove;
-		file.copy(URL("http://127.0.0.1/testCopy.txt"), true);
-
-		assert("hello!" == "testCopy.txt".read);
-
-		"testFile.txt".remove;
-		"testCopy.txt".remove;
-	}
-
-	unittest {
-		"level1/level2".mkdirRecurse;
-		"level1/level2/testFile.txt".write("hello!");
-
-		auto dav = new FileDav();
-		dav.root = Path("");
-
-		auto file = dav.getResource(URL("http://127.0.0.1/level1"));
-		file.copy(URL("http://127.0.0.1/_test"));
-
-		assert("hello!" == "_test/level2/testFile.txt".read);
-
-		"level1".rmdirRecurse;
-		"_test".rmdirRecurse;
-	}
-
-
-	override void setContent(const ubyte[] content) {
-		immutable string p = filePath.to!string;
-		p.write(content);
-	}
 }
 
 /// A structure that helps to create the propfind response
@@ -511,6 +422,7 @@ struct PropfindResponse {
 /// The main DAV protocol implementation
 abstract class Dav {
 	Path root;
+	DavProp[string] resourcePropStorage;
 
 	abstract DavResource getResource(URL url);
 	abstract DavResource createCollection(URL url);
@@ -540,17 +452,17 @@ abstract class Dav {
 			return DavDepth.infinity;
 		}
 
-		bool[string] propList(XmlNode document) {
+		bool[string] propList(DavProp document) {
 			bool[string] list;
 
-			XmlNode[] prop = document.parseXPath("d:propfind/d:prop");
+			auto properties = document["propfind"]["prop"];
 
-			if(prop.length > 0) {
-				auto properties = prop[0].getChildren;
+			if(properties.length > 0)
+				foreach(string key, p; properties)
+					list[key.toLower] = true;
 
-				foreach(p; properties)
-					list[p.getName.toLower] = true;
-			}
+			writeln("LIST: ", list);
+
 			return list;
 		}
 
@@ -585,21 +497,28 @@ abstract class Dav {
 		string requestXml = cast(string)req.bodyReader.readAllUTF8;
 
 		if(requestXml.length > 0) {
-			XmlNode document = readDocument(requestXml);
-			properties = propList(document);
+			DavProp document;
+			try document = requestXml.parseXMLProp;
+			catch (DavPropException e)
+				throw new DavException(HTTPStatus.badRequest, "Invalid xml body.");
+
+			requestedProperties = propList(document);
 		}
 
 		auto selectedResource = getResource(req.fullURL);
 
 		auto response = new PropfindResponse();
-		response.list = selectedResource ~ selectedResource.getChildren(depth);
+		response.list ~= selectedResource;
+
+		if(selectedResource.isCollection)
+			response.list ~= selectedResource.getChildren(depth);
 
 		res.statusCode = HTTPStatus.multiStatus;
 
-		if(properties.length == 0)
+		if(requestedProperties.length == 0)
 			res.writeBody(response.toString, "application/xml");
 		else
-			res.writeBody(response.toStringProps(properties), "application/xml");
+			res.writeBody(response.toStringProps(requestedProperties), "application/xml");
 	}
 
 	void lock(HTTPServerRequest req, HTTPServerResponse res) {
@@ -614,7 +533,7 @@ abstract class Dav {
 		if(requestXml.length == 0)
 			throw new DavException(HTTPStatus.internalServerError, "LOCK body expected.");
 
-		XmlNode document = readDocument(requestXml);
+		DavProp document = requestXml.parseXMLProp;
 		auto lockInfo = DavLockInfo.fromXML(document);
 
 		auto resource = getOrCreateResource(req.fullURL, res.statusCode);
@@ -642,6 +561,18 @@ abstract class Dav {
 		resource.setContent(content);
 
 		res.writeBody("", "text/plain");
+	}
+
+	void proppatch(HTTPServerRequest req, HTTPServerResponse res) {
+		string path = getRequestPath(req);
+		res.statusCode = HTTPStatus.ok;
+
+		DavResource resource = getResource(req.fullURL);
+
+		auto content = req.bodyReader.readAllUTF8;
+		auto xmlString = resource.propPatch(content);
+
+		res.writeBody(xmlString, "text/plain");
 	}
 
 	void mkcol(HTTPServerRequest req, HTTPServerResponse res) {
@@ -703,44 +634,6 @@ abstract class Dav {
 	}
 }
 
-/// File dav impplementation
-class FileDav : Dav {
-	@property
-	Path filePath(URL url) {
-		return root ~ url.path.toString[1..$];
-	}
-
-	override DavResource getResource(URL url) {
-		auto filePath = filePath(url);
-
-		if(!filePath.toString.exists)
-			throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
-
-		return new DavFileResource(this, root, url);
-	}
-
-	override DavResource createCollection(URL url) {
-		auto filePath = filePath(url);
-
-		if(filePath.toString.exists)
-			throw new DavException(HTTPStatus.methodNotAllowed, "plain/text");
-
-		mkdir(filePath.toString);
-
-		return new DavFileResource(this, root, url);
-	}
-
-	override DavResource createProperty(URL url) {
-		auto filePath = filePath(url);
-
-		if(filePath.toString.exists)
-			throw new DavException(HTTPStatus.methodNotAllowed, "plain/text");
-
-		filePath.toString.write("");
-
-		return new DavFileResource(this, root, url);
-	}
-}
 
 HTTPServerRequestDelegate serveDav(T : Dav)(Path path) {
 	auto dav = new T;
@@ -749,6 +642,16 @@ HTTPServerRequestDelegate serveDav(T : Dav)(Path path) {
 	void callback(HTTPServerRequest req, HTTPServerResponse res)
 	{
 		try {
+
+			debug {
+				if("X-Litmus" in req.headers) {
+					writeln("\n\n\n");
+					writeln(req.headers["X-Litmus"]);
+					writeln("Method: ", req.method);
+					writeln("==========================");
+				}
+			}
+
 			if(req.method == HTTPMethod.OPTIONS) {
 				dav.options(req, res);
 			} else if(req.method == HTTPMethod.PROPFIND) {
@@ -757,6 +660,8 @@ HTTPServerRequestDelegate serveDav(T : Dav)(Path path) {
 				dav.get(req, res);
 			} else if(req.method == HTTPMethod.PUT) {
 				dav.put(req, res);
+			} else if(req.method == HTTPMethod.PROPPATCH) {
+				dav.proppatch(req, res);
 			} else if(req.method == HTTPMethod.LOCK) {
 				dav.lock(req, res);
 			} else if(req.method == HTTPMethod.MKCOL) {
@@ -782,8 +687,4 @@ HTTPServerRequestDelegate serveDav(T : Dav)(Path path) {
 	}
 
 	return &callback;
-}
-
-HTTPServerRequestDelegate serveFileDav(Path path) {
-	return serveDav!FileDav(path);
 }

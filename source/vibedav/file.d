@@ -112,7 +112,7 @@ final class DavFileResource : DavResource {
 		properties["d:getlastmodified"] = new DavProp(lastModified);
 		properties["d:creationdate"] = new DavProp(creationDate);
 
-		if(!isCollection) {
+		if(!pathstr.isDir) {
 			properties["d:getcontentlength"] = new DavProp(dirent.size.to!string);
 			properties["d:getcontenttype"] = new DavProp(getMimeTypeForFile(pathstr));
 		}

@@ -31,18 +31,18 @@ import std.uri;
 import std.uuid;
 
 
-class DavPropException : Exception {
+class DavPropException : DavException {
 
 	///
-	this(string msg, string file = __FILE__, size_t line = __LINE__, Throwable next = null)
+	this(HTTPStatus status, string msg, string mime = "plain/text", string file = __FILE__, size_t line = __LINE__, Throwable next = null)
 	{
-		super(msg, file, line, next);
+		super(status, msg, mime, file, line, next);
 	}
 
 	///
-	this(string msg, Throwable next, string file = __FILE__, size_t line = __LINE__)
+	this(HTTPStatus status, string msg, Throwable next, string mime = "plain/text", string file = __FILE__, size_t line = __LINE__)
 	{
-		super(msg, next, file, line);
+		super(status, msg, next, mime, file, line);
 	}
 }
 
@@ -55,11 +55,11 @@ class DavProp {
 
 	string name;
 	string value;
-	string namespace;
+	string namespaceAttr;
 
-	this(string value, string namespace) {
+	this(string value, string namespaceAttr) {
 		this(value);
-		this.namespace = namespace;
+		this.namespaceAttr = namespaceAttr;
 	}
 
 	this(string value) {
@@ -70,20 +70,22 @@ class DavProp {
 	this() {}
 
 	private {
-
 		ulong getKeyPos(string key) inout {
-			foreach(i; 0..properties.length)
-				if(properties[i].name == key || properties[i].tagName == key)
-					return i;
+			foreach(i; 0..properties.length) {
+				if(properties[i].name == key ||
+				   properties[i].tagName == key ||
+				   properties[i].tagName ~ ":" ~ properties[i].namespace == key)
+						return i;
+			}
 
-			throw new DavPropException("Key `" ~ key ~ "` not found");
+			throw new DavPropException(HTTPStatus.notFound, "Key `" ~ key ~ "` not found");
 		}
 
-		string getNamespaceAttributes() {
+		string getNamespaceAttributes() inout {
 			string ns;
 
-			if(namespace != "")
-				ns = ` xmlns="` ~ namespace ~ `"`;
+			if(namespaceAttr != "")
+				ns = ` xmlns="` ~ namespaceAttr ~ `"`;
 
 			if(namespaces.length > 0)
 				foreach(string key, string value; namespaces)
@@ -98,7 +100,7 @@ class DavProp {
 	}
 
 	@property {
-		string prefix() {
+		string prefix() inout {
 			auto pos = name.indexOf(":");
 
 			if (pos == -1) return "";
@@ -125,6 +127,29 @@ class DavProp {
 		ulong length() {
 			return properties.length;
 		}
+
+		string namespace() inout {
+			if(namespaceAttr != "")
+				return namespaceAttr;
+
+			if(prefix != "")
+				return getNamespaceForPrefix(prefix);
+
+			if(parent !is null)
+				return parent.namespace;
+
+			return "";
+		}
+	}
+
+	string getNamespaceForPrefix(string prefix) inout {
+		if(prefix in namespaces)
+			return namespaces[prefix];
+
+		if(parent !is null)
+			return parent.getNamespaceForPrefix(prefix);
+
+		throw new DavPropException(HTTPStatus.internalServerError, `Undefined '` ~ prefix ~ `' namespace.`);
 	}
 
 	bool isNameSpaceDefined(string prefix) {
@@ -205,6 +230,7 @@ class DavProp {
 		if(key in this) {
 			auto pos = getKeyPos(key);
 			properties.remove(pos);
+			properties.length--;
 		}
 	}
 
@@ -268,17 +294,17 @@ class DavProp {
 
 	void addNamespace(string prefix, string namespace) {
 		if(isNameSpaceDefined(prefix))
-			throw new DavPropException("Prefix `"~prefix~"` is already defined.");
+			throw new DavPropException(HTTPStatus.internalServerError, "Prefix `"~prefix~"` is already defined.");
 
 		if(namespace == "")
-			throw new DavPropException("Empty namespace for prefix `"~prefix~"`.");
+			throw new DavPropException(HTTPStatus.internalServerError, "Empty namespace for prefix `"~prefix~"`.");
 
 		namespaces[prefix] = namespace;
 	}
 
 	void checkNamespacePrefixes() {
 		if(prefix != "" && !isPrefixNameSpaceDefined)
-			throw new DavPropException(`Undefined '` ~ prefix ~ `' namespace.`);
+			throw new DavPropException(HTTPStatus.internalServerError, `Undefined '` ~ prefix ~ `' namespace.`);
 
 		foreach(DavProp p; properties) {
 			p.checkNamespacePrefixes;
@@ -321,6 +347,18 @@ unittest {
 
 unittest {
 	DavProp properties = new DavProp;
+
+	properties["prop1"] = "value1";
+	properties["prop2"] = "value2";
+	properties["prop3"] = "value2";
+
+	properties.remove("prop1");
+
+	assert(properties.length == 2);
+}
+
+unittest {
+	DavProp properties = new DavProp;
 	auto prop1 = new DavProp;
 	auto prop2 = new DavProp;
 	auto other = new DavProp;
@@ -347,7 +385,7 @@ unittest {
 unittest {
 	auto prop = new DavProp;
 	prop["name"] = "value";
-	prop["name"].namespace = "ns";
+	prop["name"].namespaceAttr = "ns";
 
 	assert(prop.toString == `<name xmlns="ns">value</name>`);
 }
@@ -384,6 +422,16 @@ unittest {
 	}
 
 	assert(raised);
+}
+
+unittest {
+	auto prop = new DavProp;
+	prop.namespaces["D"] = "DAV:";
+	prop.name = "root";
+	prop["D:name"] = "";
+	prop["D:name"]["D:val"] = "";
+
+	assert(prop["D:name"]["D:val"].namespace == "DAV:");
 }
 
 string normalize(const string text) {
@@ -491,7 +539,7 @@ DavProp parseXMLProp(string xmlText, DavProp parent = null) {
 
 DavProp parseXMLPropText(string xmlNodeText, ref ulong end) {
 	if(xmlNodeText[0] == '<')
-		throw new DavPropException("The text node can not start with `<`.");
+		throw new DavPropException(HTTPStatus.internalServerError, "The text node can not start with `<`.");
 
 	DavProp node = new DavProp;
 
@@ -508,8 +556,6 @@ DavProp parseXMLPropText(string xmlNodeText, ref ulong end) {
 }
 
 DavProp parseXMLPropNode(string xmlNodeText, DavProp parent, ref ulong end) {
-	writeln("xmlNodeText ", xmlNodeText);
-
 	DavProp node = new DavProp;
 	node.parent = parent;
 	string startTag;
@@ -543,14 +589,14 @@ DavProp parseXMLPropNode(string xmlNodeText, DavProp parent, ref ulong end) {
 				tags--;
 
 			if(tags < 0)
-				throw new DavPropException("Invalid end tag for `" ~ node.name ~ "`.");
+				throw new DavPropException(HTTPStatus.internalServerError, "Invalid end tag for `" ~ node.name ~ "`.");
 			else if(tags == 0)
 				return xmlNodeText[end..i];
 
 			i++;
 		}
 
-		throw new DavPropException("Can not find the `" ~ node.name ~ "` end tag.");
+		throw new DavPropException(HTTPStatus.internalServerError, "Can not find the `" ~ node.name ~ "` end tag.");
 	}
 
 	void setNameSpaces() {
@@ -583,7 +629,7 @@ DavProp parseXMLPropNode(string xmlNodeText, DavProp parent, ref ulong end) {
 	}
 
 	if(xmlNodeText[0] != '<')
-		throw new DavPropException("The node must start with `<`.");
+		throw new DavPropException(HTTPStatus.internalServerError, "The node must start with `<`.");
 
 	///get tag attributes
 	foreach(i; 0..xmlNodeText.length) {
@@ -603,10 +649,10 @@ DavProp parseXMLPropNode(string xmlNodeText, DavProp parent, ref ulong end) {
 	tagPieces = startTag.split(" ");
 
 	if(tagPieces.length == 0)
-		throw new DavPropException("Invalid node content.");
+		throw new DavPropException(HTTPStatus.internalServerError, "Invalid node content.");
 	else {
 		setNameSpaces;
-		node.namespace = getAttrValue("xmlns");
+		node.namespaceAttr = getAttrValue("xmlns");
 	}
 
 	if(tagPieces[0] == "?xml")
@@ -684,7 +730,7 @@ unittest {
 
 unittest {
 	auto prop = parseXMLProp(`<cat xmlns="DAV:"></cat>`)[0];
-	assert(prop.namespace == `DAV:`);
+	assert(prop.namespaceAttr == `DAV:`);
 }
 
 unittest {
@@ -728,9 +774,7 @@ unittest {
 
 unittest {
 	//allow to have childrens with the same tag name
-	writeln("==========================");
 	auto prop = parseXMLProp(`<a><b>c1</b><b>c2</b></a>`);
-	writeln(prop.toString);
 	assert(prop.toString == `<a><b>c1</b><b>c2</b></a>`);
 }
 

@@ -207,7 +207,6 @@ class DavLockInfo {
 		}
 
 		a ~= `<D:locktoken><D:href>urn:uuid:`~token~`</D:href></D:locktoken>`;
-
 		a ~= `<D:lockroot><D:href>`~root.fullURL~`</D:href></D:lockroot>`;
 
 		a ~= `</D:activelock></D:lockdiscovery></D:prop>`;
@@ -222,9 +221,7 @@ class DavResource {
 	URL url;
 
 	DavProp properties;
-
 	HTTPStatus statusCode;
-	bool isCollection;
 
 	protected {
 		Dav dav;
@@ -239,49 +236,78 @@ class DavResource {
 		if(strUrl !in dav.resourcePropStorage) {
 			dav.resourcePropStorage[strUrl] = new DavProp;
 			dav.resourcePropStorage[strUrl].addNamespace("d", "DAV:");
+			dav.resourcePropStorage[strUrl]["d:resourcetype"] = "";
 		}
 
 		this.properties = dav.resourcePropStorage[strUrl];
 	}
 
-	@property
-	string name() {
-		return href.baseName;
-	}
-
-	@property
-	string fullURL() {
-		return url.toString;
-	}
-
-	string propXmlString(bool[string] props = cast(bool[string])[]) {
-		string str = `<d:href>` ~ url.to!string ~ `</d:href>`;
-		str ~= `<d:propstat><d:prop>`;
-
-		foreach(key, val; properties) {
-			auto key1 = key.toLower;
-
-			writeln("is ", key1, " in ", props, " ", key1 in props);
-
-			bool add = true;
-			if(props.length > 0 && (key1 in props) is null)
-				add = false;
-
-			if(add)
-				str ~= val.toString;
+	@property {
+		string name() {
+			return href.baseName;
 		}
 
-		if(props.length == 0 || (props.length > 0 && ("d:resourcetype" in props) !is null)) {
-			if(isCollection)
-				str ~= `<d:resourcetype><d:collection /></d:resourcetype>`;
+		string fullURL() {
+			return url.toString;
+		}
+
+		void isCollection(bool value) {
+			if(value)
+				properties["d:resourcetype"]["d:collection"] = "";
 			else
-				str ~= `<d:resourcetype />`;
+				properties["d:resourcetype"].remove("d:collection");
 		}
 
-		str ~= `</d:prop></d:propstat>`;
-		str ~= `<d:status>HTTP/1.1 ` ~ statusCode.to!int.to!string ~ ` ` ~ httpStatusText(statusCode) ~ `</d:status>`;
+		bool isCollection() {
+			if("d:collection" in properties["d:resourcetype"])
+				return true;
+			else
+				return false;
+		}
+	}
 
-		return str;
+	void filterProps(DavProp parent, bool[string] props = cast(bool[string])[]) {
+		DavProp item = new DavProp;
+		item.parent = parent;
+
+		DavProp[][int] result;
+
+		item[`d:href`] = url.to!string;
+
+		foreach(key; props.keys) {
+			DavProp p;
+			auto splitPos = key.indexOf(":");
+			auto tagName = key[0..splitPos];
+			auto tagNameSpace = key[splitPos+1..$];
+
+			try {
+				p = properties[key];
+				result[200] ~= p;
+			} catch (DavException e) {
+				p = new DavProp;
+				p.name = tagName;
+				p.namespaceAttr = tagNameSpace;
+				result[e.status] ~= p;
+			}
+		}
+
+		foreach(code; result.keys) {
+			auto propStat = new DavProp;
+			propStat.parent = item;
+			propStat.name = "d:propstat";
+			propStat["d:prop"] = "";
+
+			foreach(p; result[code]) {
+				propStat["d:prop"].addChild(p);
+			}
+
+			propStat["d:status"] = `HTTP/1.1 ` ~ code.to!string ~ ` ` ~ httpStatusText(code);
+			item.addChild(propStat);
+		}
+
+		item["d:status"] = `HTTP/1.1 ` ~ statusCode.to!int.to!string ~ ` ` ~ httpStatusText(statusCode);
+
+		parent.addChild(item);
 	}
 
 	bool hasChild(Path path) {
@@ -308,7 +334,6 @@ class DavResource {
 
 		foreach(prop; setList) {
 			foreach(string key, p; prop) {
-				writeln("=>", key);
 				properties[key] = p;
 				result ~= `<d:propstat><d:prop>` ~ p.toString ~ `</d:prop>`;
 				HTTPStatus status = HTTPStatus.ok;
@@ -316,43 +341,18 @@ class DavResource {
 			}
 		}
 
-		/*
 		//remove properties
-		XmlNode[] removeList = document.parseXPath("d:propertyupdate/d:remove/d:prop") ~ document.parseXPath("propertyupdate/remove/prop");
+		auto removeList = [document].getTagChilds("propertyupdate")
+								 .getTagChilds("remove")
+								 .getTagChilds("prop");
 
-		foreach(prop; removeList) {
-			auto properties = prop.getChildren;
-
-			foreach(p; properties) {
-				string tagName = p.getName;
-				string namespace = "";
-
-				if(p.hasAttribute("xmlns"))
-					namespace = p.getAttribute("xmlns");
-
-				DavProp resProp;
-				HTTPStatus status = HTTPStatus.ok;
-
-				if(tagName in this.properties) {
-					resProp = this.properties[tagName];
-					resProp.value = "";
-				} else {
-					resProp = new DavProp(tagName, namespace);
-					status = HTTPStatus.notFound;
-				}
-
-				//result ~= `<d:propstat><D:prop>` ~ resProp.toTag(tagName) ~ `</d:prop>`;
-
-				try removeProp(tagName);
-				catch (DavException e) {
-					status = e.status;
-					description ~= e.msg;
-				}
-
-				result ~= `<d:status>HTTP/1.1 ` ~ status.to!int.to!string ~ ` ` ~
-								status.to!string ~ `</d:status></d:propstat>`;
+		foreach(prop; removeList)
+			foreach(string key, p; prop) {
+				properties.remove(key);
+				result ~= `<d:propstat><d:prop>` ~ p.toString ~ `</d:prop>`;
+				HTTPStatus status = HTTPStatus.notFound;
+				result ~= `<d:status>HTTP/1.1 ` ~ status.to!int.to!string ~ ` ` ~ status.to!string ~ `</d:status></d:propstat>`;
 			}
-		}*/
 
 		if(description != "")
 			result ~= `<d:responsedescription>` ~ description ~ `</d:responsedescription>`;
@@ -408,14 +408,13 @@ struct PropfindResponse {
 
 	string toStringProps(bool[string] props) {
 		string str = `<?xml version="1.0" encoding="UTF-8"?>`;
-		str ~= `<d:multistatus xmlns:d="DAV:">`;
+		auto response = parseXMLProp(`<d:multistatus xmlns:d="DAV:"><d:response></d:response></d:multistatus>`);
 
-		foreach(res; list)
-			str ~= `<d:response>` ~ res.propXmlString(props) ~ `</d:response>`;
+		foreach(item; list) {
+			item.filterProps(response["d:multistatus"]["d:response"], props);
+		}
 
-		str ~= `</d:multistatus>`;
-
-		return str;
+		return str ~ response.toString;
 	}
 }
 
@@ -459,9 +458,7 @@ abstract class Dav {
 
 			if(properties.length > 0)
 				foreach(string key, p; properties)
-					list[key.toLower] = true;
-
-			writeln("LIST: ", list);
+					list[key ~ ":" ~ p.namespace] = true;
 
 			return list;
 		}
@@ -492,7 +489,7 @@ abstract class Dav {
 	void propfind(HTTPServerRequest req, HTTPServerResponse res) {
 		string path = getRequestPath(req);
 		int depth = getDepth(req).to!int;
-		bool[string] properties;
+		bool[string] requestedProperties;
 
 		string requestXml = cast(string)req.bodyReader.readAllUTF8;
 
@@ -646,6 +643,7 @@ HTTPServerRequestDelegate serveDav(T : Dav)(Path path) {
 			debug {
 				if("X-Litmus" in req.headers) {
 					writeln("\n\n\n");
+					writeln(req.fullURL);
 					writeln(req.headers["X-Litmus"]);
 					writeln("Method: ", req.method);
 					writeln("==========================");

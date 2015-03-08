@@ -30,6 +30,7 @@ import std.stdio : writeln; //todo: remove this
 import std.typecons;
 import std.uri;
 import std.uuid;
+import tested;
 
 alias HeaderList = DictionaryList!(string, false, 32L);
 
@@ -45,6 +46,7 @@ string getHeaderValue(HeaderList headers, string name, string defaultValue = "")
 	return value;
 }
 
+@name("basic check for getHeaderValue")
 unittest {
 	HeaderList list;
 	list["key"] = "value";
@@ -52,12 +54,14 @@ unittest {
 	assert(val == "value");
 }
 
+@name("getHeaderValue with default value")
 unittest {
 	HeaderList list;
 	auto val = getHeaderValue(list, "key", "default");
 	assert(val == "default");
 }
 
+@name("check if getHeaderValue fails")
 unittest {
 	bool raised = false;
 
@@ -327,37 +331,43 @@ class DavResource {
 
 		auto document = parseXMLProp(content);
 
-		//set properties
-		auto setList = [document].getTagChilds("propertyupdate")
-								 .getTagChilds("set")
-								 .getTagChilds("prop");
-
-		foreach(prop; setList) {
-			foreach(string key, p; prop) {
-				properties[key] = p;
-				result ~= `<d:propstat><d:prop>` ~ p.toString ~ `</d:prop>`;
-				HTTPStatus status = HTTPStatus.ok;
-				result ~= `<d:status>HTTP/1.1 ` ~ status.to!int.to!string ~ ` ` ~ status.to!string ~ `</d:status></d:propstat>`;
-			}
-		}
 
 		//remove properties
-		auto removeList = [document].getTagChilds("propertyupdate")
-								 .getTagChilds("remove")
-								 .getTagChilds("prop");
+		auto updateList = [document].getTagChilds("propertyupdate");
 
-		foreach(prop; removeList)
-			foreach(string key, p; prop) {
-				properties.remove(key);
-				result ~= `<d:propstat><d:prop>` ~ p.toString ~ `</d:prop>`;
-				HTTPStatus status = HTTPStatus.notFound;
-				result ~= `<d:status>HTTP/1.1 ` ~ status.to!int.to!string ~ ` ` ~ status.to!string ~ `</d:status></d:propstat>`;
+		foreach(string key, item; updateList[0]) {
+			if(item.tagName == "remove") {
+				auto removeList = [item].getTagChilds("prop");
+
+				foreach(prop; removeList)
+					foreach(string key, p; prop) {
+						properties.remove(key);
+						result ~= `<d:propstat><d:prop>` ~ p.toString ~ `</d:prop>`;
+						HTTPStatus status = HTTPStatus.notFound;
+						result ~= `<d:status>HTTP/1.1 ` ~ status.to!int.to!string ~ ` ` ~ status.to!string ~ `</d:status></d:propstat>`;
+					}
 			}
+			else if(item.tagName == "set") {
+				auto setList = [item].getTagChilds("prop");
+
+				foreach(prop; setList) {
+					foreach(string key, p; prop) {
+						writeln("set", key);
+						properties[key] = p;
+						result ~= `<d:propstat><d:prop>` ~ p.toString ~ `</d:prop>`;
+						HTTPStatus status = HTTPStatus.ok;
+						result ~= `<d:status>HTTP/1.1 ` ~ status.to!int.to!string ~ ` ` ~ status.to!string ~ `</d:status></d:propstat>`;
+					}
+				}
+			}
+		}
 
 		if(description != "")
 			result ~= `<d:responsedescription>` ~ description ~ `</d:responsedescription>`;
 
 		result ~= `</d:response></d:multistatus>`;
+
+		writeln("properties:", properties);
 
 		string strUrl = url.toString;
 		dav.resourcePropStorage[strUrl] = properties;

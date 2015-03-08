@@ -5,8 +5,19 @@
 	"authors": ["Szabo Bogdan"],
 	"license": "MIT",
 	"dependencies": {
-		"vibe-d": "~>0.7.22"
+		"vibe-d": "~>0.7.22",
+		"tested": ">=0.9.0"
 	},
 
-	"targetType": "library"
+	"targetType": "library",
+
+	"configurations": [
+		{
+			"name": "tested",
+			"mainSourceFile": "source/test.d",
+			"versions": ["VibeCustomMain"],
+			"dflags": ["-unittest"],
+			"targetType": "executable"
+		}
+	]
 }

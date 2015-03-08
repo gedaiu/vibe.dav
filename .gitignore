@@ -9,3 +9,7 @@ __dummy.html
 dub.selections.json
 
 __test__library__
+
+vibe-dav
+
+vibe-dav.sublime-project

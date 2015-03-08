@@ -30,6 +30,8 @@ import std.typecons;
 import std.uri;
 import std.uuid;
 
+import tested: testName = name;
+
 /// File dav impplementation
 class FileDav : Dav {
 	@property
@@ -162,6 +164,7 @@ final class DavFileResource : DavResource {
 			filePath.toString.remove;
 	}
 
+	@testName("exists")
 	unittest {
 		"level1/level2".mkdirRecurse;
 		"level1/level2/testFile1.txt".write("hello!");
@@ -235,6 +238,7 @@ final class DavFileResource : DavResource {
 		return retCode;
 	}
 
+	@testName("copy file")
 	unittest {
 		"testFile.txt".write("hello!");
 
@@ -251,6 +255,7 @@ final class DavFileResource : DavResource {
 		"testCopy.txt".remove;
 	}
 
+	@testName("copy dir")
 	unittest {
 		"level1/level2".mkdirRecurse;
 		"level1/level2/testFile.txt".write("hello!");

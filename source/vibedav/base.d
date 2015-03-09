@@ -8,6 +8,7 @@ module vibedav.base;
 
 public import vibedav.util;
 public import vibedav.prop;
+public import vibedav.ifheader;
 
 import vibe.core.log;
 import vibe.core.file;
@@ -89,11 +90,18 @@ string getHeader(string name)(HeaderList headers) {
 	} else static if(name == "Overwrite") {
 		value = getHeaderValue(headers, name, "F");
 		value.enforce!(["T", "F"]);
+	} else static if(name == "If") {
+		value = getHeaderValue(headers, name, "()");
 	} else {
 		value = getHeaderValue(headers, name);
 	}
 
 	return value;
+}
+
+
+IfHeader getIfHeader(HTTPServerRequest req) {
+	return IfHeader.parse(getHeader!"If"(req.headers));
 }
 
 class DavException : Exception {
@@ -140,28 +148,6 @@ class DavLockInfo {
 
 	static DavLockInfo fromXML(DavProp node) {
 		auto lock = new DavLockInfo;
-		/*
-		XmlNode[] xmlSharedScope = node.parseXPath("d:lockinfo/d:lockscope/d:shared") ~ node.parseXPath("lockinfo/lockscope/shared");
-		XmlNode[] xmlExclusiveScope = node.parseXPath("d:lockinfo/d:lockscope/d:exclusive") ~ node.parseXPath("lockinfo/lockscope/exclusive");
-		XmlNode[] xmlWriteType = node.parseXPath("d:lockinfo/d:locktype/d:write") ~ node.parseXPath("lockinfo/locktype/write");
-		XmlNode[] xmlOwner = node.parseXPath("d:lockinfo/d:owner/d:href") ~ node.parseXPath("lockinfo/owner/href");
-
-		if(xmlSharedScope.length == 1)
-			lock.scopeLock = Scope.sharedLock;
-		else if(xmlExclusiveScope.length == 1)
-			lock.scopeLock = Scope.exclusiveLock;
-		else
-			throw new DavException(HTTPStatus.internalServerError, "Unknown lock.");
-
-		if(xmlWriteType.length == 1)
-			lock.isWrite = true;
-		else
-			lock.isWrite = false;
-
-		if(xmlOwner.length == 1)
-			lock.owner = xmlOwner[0].getInnerXML;
-
-		lock.token = randomUUID.toString;*/
 
 		return lock;
 	}
@@ -227,8 +213,11 @@ class DavResource {
 	DavProp properties;
 	HTTPStatus statusCode;
 
+
+
 	protected {
 		Dav dav;
+		DavLockInfo[] locks;
 	}
 
 	this(Dav dav, URL url) {
@@ -268,6 +257,14 @@ class DavResource {
 			else
 				return false;
 		}
+
+		bool isLocked() {
+			return locks.length > 0;
+		}
+	}
+
+	void addLock(DavLockInfo lock) {
+		locks ~= lock;
 	}
 
 	void filterProps(DavProp parent, bool[string] props = cast(bool[string])[]) {
@@ -528,29 +525,38 @@ abstract class Dav {
 			res.writeBody(response.toStringProps(requestedProperties), "application/xml");
 	}
 
-	void lock(HTTPServerRequest req, HTTPServerResponse res) {
-		string path = getRequestPath(req);
-		ulong depth = getDepth(req);
-		string timeout = getHeader!"Timeout"(req.headers);
-
-		bool[string] properties;
-
-		string requestXml = cast(string)req.bodyReader.readAllUTF8;
-
-		if(requestXml.length == 0)
-			throw new DavException(HTTPStatus.internalServerError, "LOCK body expected.");
-
+	DavLockInfo createLock(DavResource resource, string requestXml) {
 		DavProp document = requestXml.parseXMLProp;
 		auto lockInfo = DavLockInfo.fromXML(document);
 
-		auto resource = getOrCreateResource(req.fullURL, res.statusCode);
-
-		lockInfo.setTimeout(timeout);
 		lockInfo.root = resource;
 
-		res.headers["Lock-Token"] = "<urn:uuid:"~lockInfo.token~">";
+		return lockInfo;
+	}
 
-		res.writeBody(lockInfo.toString, "application/xml");
+	void lock(HTTPServerRequest req, HTTPServerResponse res) {
+		string timeout = getHeader!"Timeout"(req.headers);
+		auto ifHeader = getIfHeader(req);
+
+		string path = getRequestPath(req);
+		ulong depth = getDepth(req);
+
+		DavLockInfo lock;
+
+		string requestXml = cast(string)req.bodyReader.readAllUTF8;
+		auto resource = getOrCreateResource(req.fullURL, res.statusCode);
+
+		if(requestXml.length != 0) {
+			lock = createLock(resource, requestXml);
+			lock.setTimeout(timeout);
+		} else if(ifHeader.isEmpty) {
+			throw new DavException(HTTPStatus.internalServerError, "LOCK body expected.");
+		}
+
+		resource.addLock(lock);
+
+		res.headers["Lock-Token"] = "<urn:uuid:"~lock.token~">";
+		res.writeBody(lock.toString, "application/xml");
 	}
 
 	void get(HTTPServerRequest req, HTTPServerResponse res) {
@@ -603,26 +609,34 @@ abstract class Dav {
 
 	void remove(HTTPServerRequest req, HTTPServerResponse res) {
 		string path = getRequestPath(req);
+		auto url = req.fullURL;
 
 		res.statusCode = HTTPStatus.noContent;
 
-		if(req.fullURL.anchor != "" || req.requestURL.indexOf("#") != -1)
+		if(url.anchor != "" || req.requestURL.indexOf("#") != -1)
 			throw new DavException(HTTPStatus.conflict, "Missing parent");
 
-		getResource(req.fullURL).remove();
+		auto resource = getResource(url);
 
+		if(resource.isLocked)
+			throw new DavException(HTTPStatus.locked, "Locked");
+
+		resource.remove();
 		res.writeBody("", "text/plain");
 	}
 
 	void move(HTTPServerRequest req, HTTPServerResponse res) {
 		string path = getRequestPath(req);
 
-		auto selectedResource = getResource(req.fullURL);
+		auto resource = getResource(req.fullURL);
+
+		if(resource.isLocked)
+			throw new DavException(HTTPStatus.locked, "Locked");
 
 		string destination = getHeader!"Destination"(req.headers);
 		string overwrite = getHeader!"Overwrite"(req.headers);
 
-		res.statusCode = selectedResource.move(URL(destination), overwrite == "T");
+		res.statusCode = resource.move(URL(destination), overwrite == "T");
 
 		res.writeBody("", "text/plain");
 	}
@@ -630,12 +644,15 @@ abstract class Dav {
 	void copy(HTTPServerRequest req, HTTPServerResponse res) {
 		string path = getRequestPath(req);
 
-		auto selectedResource = getResource(req.fullURL);
+		auto resource = getResource(req.fullURL);
+
+		if(resource.isLocked)
+			throw new DavException(HTTPStatus.locked, "Locked");
 
 		string destination = getHeader!"Destination"(req.headers);
 		string overwrite = getHeader!"Overwrite"(req.headers);
 
-		res.statusCode = selectedResource.copy(URL(destination), overwrite == "T");
+		res.statusCode = resource.copy(URL(destination), overwrite == "T");
 
 		res.writeBody("", "text/plain");
 	}

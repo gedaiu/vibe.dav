@@ -1,7 +1,7 @@
 /**
  * Authors: Szabo Bogdan <szabobogdan@yahoo.com>
  * Date: 2 25, 2015
- * License: Subject to the	 terms of the MIT license, as written in the included LICENSE.txt file.
+ * License: Subject to the terms of the MIT license, as written in the included LICENSE.txt file.
  * Copyright: Public Domain
  */
 module vibedav.prop;

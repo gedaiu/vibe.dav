@@ -4,7 +4,14 @@ import vibedav.base;
 import vibedav.file;
 import vibedav.prop;
 import vibedav.util;
-alias allModules = TypeTuple!(vibedav.base, vibedav.file, vibedav.prop, vibedav.util);
+import vibedav.ifheader;
+import vibedav.parser;
+alias allModules = TypeTuple!(vibedav.base,
+							  vibedav.file,
+							  vibedav.prop,
+							  vibedav.util,
+							  vibedav.ifheader,
+							  vibedav.parser);
 
 import std.stdio;
 import core.runtime;

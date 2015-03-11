@@ -9,6 +9,7 @@ module vibedav.base;
 public import vibedav.util;
 public import vibedav.prop;
 public import vibedav.ifheader;
+public import vibedav.locks;
 
 import vibe.core.log;
 import vibe.core.file;
@@ -30,7 +31,6 @@ import std.string;
 import std.stdio : writeln; //todo: remove this
 import std.typecons;
 import std.uri;
-import std.uuid;
 import tested;
 
 alias HeaderList = DictionaryList!(string, false, 32L);
@@ -99,7 +99,6 @@ string getHeader(string name)(HeaderList headers) {
 	return value;
 }
 
-
 IfHeader getIfHeader(HTTPServerRequest req) {
 	return IfHeader.parse(getHeader!"If"(req.headers));
 }
@@ -131,93 +130,28 @@ enum DavDepth : int {
 	infinity = 99
 };
 
-class DavLockInfo {
+DavDepth getDepthHeader(HTTPServerRequest req) {
+	if("depth" in req.headers) {
+		string strDepth = getHeader!"Depth"(req.headers);
 
-	enum Scope {
-		exclusiveLock,
-		sharedLock
-	};
-
-	Scope scopeLock;
-	bool isWrite;
-	string owner;
-	SysTime timeout;
-	DavResource root;
-	string token;
-	DavDepth depth;
-
-	static DavLockInfo fromXML(DavProp node) {
-		auto lock = new DavLockInfo;
-
-		return lock;
+		if(strDepth == "0") return DavDepth.zero;
+		if(strDepth == "1") return DavDepth.one;
 	}
 
-	/// Set the timeout based on the request header
-	void setTimeout(string timeoutHeader) {
-		if(timeoutHeader.indexOf("Infinite") != -1) {
-			timeout = SysTime.max;
-			return;
-		}
-
-		auto secIndex = timeoutHeader.indexOf("Second-");
-		if(secIndex != -1) {
-			auto val = timeoutHeader[secIndex+7..$].to!int;
-			timeout = Clock.currTime + dur!"seconds"(val);
-			return;
-		}
-
-		throw new DavException(HTTPStatus.internalServerError, "Invalid timeout value");
-	}
-
-	override string toString() {
-		string a = `<?xml version="1.0" encoding="utf-8" ?>`;
-		a ~= `<D:prop xmlns:D="DAV:"><D:lockdiscovery><D:activelock>`;
-
-		if(isWrite)
-			a ~= `<D:locktype><D:write/></D:locktype>`;
-
-		if(scopeLock == Scope.exclusiveLock)
-			a ~= `<D:lockscope><D:exclusive/></D:lockscope>`;
-		else if(scopeLock == Scope.sharedLock)
-			a ~= `<D:lockscope><D:shared/></D:lockscope>`;
-
-		if(depth == DavDepth.zero)
-			a ~= `<D:depth>0</D:depth>`;
-		else if(depth == DavDepth.infinity)
-			a ~= `<D:depth>infinity</D:depth>`;
-
-		if(owner != "")
-			a ~= `<D:owner><D:href>`~owner~`</D:href></D:owner>`;
-
-		if(timeout == SysTime.max)
-			a ~= `<D:timeout>Infinite</D:timeout>`;
-		else {
-			long seconds = (timeout - Clock.currTime).total!"seconds";
-			a ~= `<D:timeout>Second-` ~ seconds.to!string ~ `</D:timeout>`;
-		}
-
-		a ~= `<D:locktoken><D:href>urn:uuid:`~token~`</D:href></D:locktoken>`;
-		a ~= `<D:lockroot><D:href>`~root.fullURL~`</D:href></D:lockroot>`;
-
-		a ~= `</D:activelock></D:lockdiscovery></D:prop>`;
-
-		return a;
-	}
+	return DavDepth.infinity;
 }
+
 
 /// Represents a general DAV resource
 class DavResource {
-	string href;
+	string href; //TODO: Where I set this?
 	URL url;
 
-	DavProp properties;
+	DavProp properties; //TODO: Maybe I should move this to Dav class, or other storage
 	HTTPStatus statusCode;
-
-
 
 	protected {
 		Dav dav;
-		DavLockInfo[] locks;
 	}
 
 	this(Dav dav, URL url) {
@@ -257,14 +191,6 @@ class DavResource {
 			else
 				return false;
 		}
-
-		bool isLocked() {
-			return locks.length > 0;
-		}
-	}
-
-	void addLock(DavLockInfo lock) {
-		locks ~= lock;
 	}
 
 	void filterProps(DavProp parent, bool[string] props = cast(bool[string])[]) {
@@ -364,8 +290,6 @@ class DavResource {
 
 		result ~= `</d:response></d:multistatus>`;
 
-		writeln("properties:", properties);
-
 		string strUrl = url.toString;
 		dav.resourcePropStorage[strUrl] = properties;
 
@@ -384,7 +308,6 @@ class DavResource {
 		if(name in dav.resourcePropStorage[urlStr]) dav.resourcePropStorage[urlStr].remove(name);
 	}
 
-
 	void remove() {
 		string strUrl = url.toString;
 
@@ -401,6 +324,7 @@ class DavResource {
 	abstract DavResource[] getChildren(ulong depth = 1);
 	abstract HTTPStatus move(URL newPath, bool overwrite = false);
 	abstract void setContent(const ubyte[] content);
+	@property abstract string eTag();
 }
 
 /// A structure that helps to create the propfind response
@@ -425,39 +349,63 @@ struct PropfindResponse {
 	}
 }
 
-/// The main DAV protocol implementation
-abstract class Dav {
+interface IDav {
+	abstract {
+		DavResource getResource(URL url);
+		DavResource createCollection(URL url);
+		DavResource createProperty(URL url);
+
+		void options(HTTPServerRequest req, HTTPServerResponse res);
+		void propfind(HTTPServerRequest req, HTTPServerResponse res);
+		void lock(HTTPServerRequest req, HTTPServerResponse res);
+		void get(HTTPServerRequest req, HTTPServerResponse res);
+		void put(HTTPServerRequest req, HTTPServerResponse res);
+		void proppatch(HTTPServerRequest req, HTTPServerResponse res);
+		void mkcol(HTTPServerRequest req, HTTPServerResponse res) ;
+		void remove(HTTPServerRequest req, HTTPServerResponse res);
+		void move(HTTPServerRequest req, HTTPServerResponse res);
+		void copy(HTTPServerRequest req, HTTPServerResponse res);
+	}
+}
+
+abstract class DavBase : IDav {
 	Path root;
 	DavProp[string] resourcePropStorage;
+	DavLockList locks;
 
 	abstract DavResource getResource(URL url);
 	abstract DavResource createCollection(URL url);
 	abstract DavResource createProperty(URL url);
 
-	void options(HTTPServerRequest req, HTTPServerResponse res) {
-		string path = req.path;
+	protected {
+		DavResource getOrCreateResource(URL url, out int status) {
+			DavResource resource;
 
-		res.headers["Accept-Ranges"] = "bytes";
-		res.headers["DAV"] = "1,2,3";
-		res.headers["Allow"] = "OPTIONS, GET, HEAD, DELETE, PROPFIND, PUT, PROPPATCH, COPY, MOVE, LOCK, UNLOCK";
-		res.headers["MS-Author-Via"] = "DAV";
+			try {
+				resource = getResource(url);
+				status = HTTPStatus.ok;
+			} catch (DavException e){
+				if(e.status != HTTPStatus.notFound)
+					throw e;
 
-		res.writeBody("", "text/plain");
+				resource = createProperty(url);
+				status = HTTPStatus.created;
+			}
+
+			return resource;
+		}
+	}
+}
+
+
+/// The main DAV protocol implementation
+abstract class Dav : DavBase {
+
+	this() {
+		locks = new DavLockList;
 	}
 
 	private {
-		DavDepth getDepth(HTTPServerRequest req) {
-
-			if("depth" in req.headers) {
-				string strDepth = getHeader!"Depth"(req.headers);
-
-				if(strDepth == "0") return DavDepth.zero;
-				if(strDepth == "1") return DavDepth.one;
-			}
-
-			return DavDepth.infinity;
-		}
-
 		bool[string] propList(DavProp document) {
 			bool[string] list;
 
@@ -476,26 +424,21 @@ abstract class Dav {
 		}
 	}
 
-	DavResource getOrCreateResource(URL url, out int status) {
-		DavResource resource;
 
-		try {
-			resource = getResource(url);
-			status = HTTPStatus.ok;
-		} catch (DavException e){
-			if(e.status != HTTPStatus.notFound)
-				throw e;
+	void options(HTTPServerRequest req, HTTPServerResponse res) {
+		string path = req.path;
 
-			resource = createProperty(url);
-			status = HTTPStatus.created;
-		}
+		res.headers["Accept-Ranges"] = "bytes";
+		res.headers["DAV"] = "1,2,3";
+		res.headers["Allow"] = "OPTIONS, GET, HEAD, DELETE, PROPFIND, PUT, PROPPATCH, COPY, MOVE, LOCK, UNLOCK";
+		res.headers["MS-Author-Via"] = "DAV";
 
-		return resource;
+		res.writeBody("", "text/plain");
 	}
 
 	void propfind(HTTPServerRequest req, HTTPServerResponse res) {
 		string path = getRequestPath(req);
-		int depth = getDepth(req).to!int;
+		int depth = getDepthHeader(req).to!int;
 		bool[string] requestedProperties;
 
 		string requestXml = cast(string)req.bodyReader.readAllUTF8;
@@ -525,62 +468,81 @@ abstract class Dav {
 			res.writeBody(response.toStringProps(requestedProperties), "application/xml");
 	}
 
-	DavLockInfo createLock(DavResource resource, string requestXml) {
-		DavProp document = requestXml.parseXMLProp;
-		auto lockInfo = DavLockInfo.fromXML(document);
-
-		lockInfo.root = resource;
-
-		return lockInfo;
-	}
-
 	void lock(HTTPServerRequest req, HTTPServerResponse res) {
-		string timeout = getHeader!"Timeout"(req.headers);
 		auto ifHeader = getIfHeader(req);
+		string timeout = getHeader!"Timeout"(req.headers);
 
 		string path = getRequestPath(req);
-		ulong depth = getDepth(req);
+		ulong depth = getDepthHeader(req);
 
-		DavLockInfo lock;
+		DavLockInfo currentLock;
 
 		string requestXml = cast(string)req.bodyReader.readAllUTF8;
 		auto resource = getOrCreateResource(req.fullURL, res.statusCode);
 
 		if(requestXml.length != 0) {
-			lock = createLock(resource, requestXml);
-			lock.setTimeout(timeout);
+			locks.check(req.fullURL, ifHeader);
+			currentLock = locks.create(resource, requestXml);
+		} else if(requestXml.length == 0) {
+			string lockId = ifHeader.getAttr("", resource.href);
+			currentLock = locks[resource.fullURL, lockId];
 		} else if(ifHeader.isEmpty) {
 			throw new DavException(HTTPStatus.internalServerError, "LOCK body expected.");
 		}
 
-		resource.addLock(lock);
+		if(currentLock is null)
+			throw new DavException(HTTPStatus.internalServerError, "LOCK not created.");
 
-		res.headers["Lock-Token"] = "<urn:uuid:"~lock.token~">";
-		res.writeBody(lock.toString, "application/xml");
+		currentLock.setTimeout(timeout);
+
+		res.headers["Lock-Token"] = "<"~currentLock.uuid~">";
+		res.writeBody(currentLock.toString, "application/xml");
 	}
 
 	void get(HTTPServerRequest req, HTTPServerResponse res) {
 		string path = getRequestPath(req);
 		res.statusCode = HTTPStatus.ok;
+
+		DavResource resource = getOrCreateResource(req.fullURL, res.statusCode);
+
 		sendRawFile(req, res, root ~ path[1..$], new HTTPFileServerSettings);
+
+		locks.setETag(resource.url, resource.eTag);
+	}
+
+	void head(HTTPServerRequest req, HTTPServerResponse res) {
+		string path = getRequestPath(req);
+		DavResource resource = getResource(req.fullURL);
+
+		res.statusCode = HTTPStatus.ok;
+		sendRawFile(req, res, root ~ path[1..$], new HTTPFileServerSettings, true);
+		writeln("2.|"~res.headers["Etag"][1..$-1]~"|");
+		locks.setETag(resource.url, resource.eTag);
 	}
 
 	void put(HTTPServerRequest req, HTTPServerResponse res) {
+		auto ifHeader = getIfHeader(req);
 		string path = getRequestPath(req);
 
 		DavResource resource = getOrCreateResource(req.fullURL, res.statusCode);
 
+		locks.check(req.fullURL, ifHeader);
+
 		auto content = req.bodyReader.readAll;
 		resource.setContent(content);
+
+		locks.setETag(resource.url, resource.eTag);
 
 		res.writeBody("", "text/plain");
 	}
 
 	void proppatch(HTTPServerRequest req, HTTPServerResponse res) {
+		auto ifHeader = getIfHeader(req);
 		string path = getRequestPath(req);
 		res.statusCode = HTTPStatus.ok;
 
 		DavResource resource = getResource(req.fullURL);
+		locks.check(req.fullURL, ifHeader);
 
 		auto content = req.bodyReader.readAllUTF8;
 		auto xmlString = resource.propPatch(content);
@@ -589,6 +551,7 @@ abstract class Dav {
 	}
 
 	void mkcol(HTTPServerRequest req, HTTPServerResponse res) {
+		auto ifHeader = getIfHeader(req);
 		string path = getRequestPath(req);
 
 		auto content = req.bodyReader.readAll;
@@ -596,11 +559,13 @@ abstract class Dav {
 			throw new DavException(HTTPStatus.unsupportedMediaType, "Body must be empty");
 
 		try {
-			getResource(req.fullURL.parentURL);
+			auto resource = getResource(req.fullURL.parentURL);
 		} catch (DavException e) {
 			if(e.status == HTTPStatus.notFound)
 				throw new DavException(HTTPStatus.conflict, "Missing parent");
 		}
+
+		locks.check(req.fullURL, ifHeader);
 
 		res.statusCode = HTTPStatus.created;
 		createCollection(req.fullURL);
@@ -608,6 +573,7 @@ abstract class Dav {
 	}
 
 	void remove(HTTPServerRequest req, HTTPServerResponse res) {
+		auto ifHeader = getIfHeader(req);
 		string path = getRequestPath(req);
 		auto url = req.fullURL;
 
@@ -617,47 +583,46 @@ abstract class Dav {
 			throw new DavException(HTTPStatus.conflict, "Missing parent");
 
 		auto resource = getResource(url);
-
-		if(resource.isLocked)
-			throw new DavException(HTTPStatus.locked, "Locked");
+		locks.check(req.fullURL, ifHeader);
 
 		resource.remove();
 		res.writeBody("", "text/plain");
 	}
 
 	void move(HTTPServerRequest req, HTTPServerResponse res) {
-		string path = getRequestPath(req);
-
-		auto resource = getResource(req.fullURL);
-
-		if(resource.isLocked)
-			throw new DavException(HTTPStatus.locked, "Locked");
-
 		string destination = getHeader!"Destination"(req.headers);
 		string overwrite = getHeader!"Overwrite"(req.headers);
 
-		res.statusCode = resource.move(URL(destination), overwrite == "T");
+		auto ifHeader = getIfHeader(req);
+		string path = getRequestPath(req);
+		auto destinationURL = URL(destination);
+
+		auto resource = getResource(req.fullURL);
+
+		locks.check(req.fullURL, ifHeader);
+		locks.check(destinationURL, ifHeader);
+
+		res.statusCode = resource.move(destinationURL, overwrite == "T");
 
 		res.writeBody("", "text/plain");
 	}
 
 	void copy(HTTPServerRequest req, HTTPServerResponse res) {
+		auto ifHeader = getIfHeader(req);
+		string destination = getHeader!"Destination"(req.headers);
+		string overwrite = getHeader!"Overwrite"(req.headers);
 		string path = getRequestPath(req);
+		auto destinationURL = URL(destination);
 
 		auto resource = getResource(req.fullURL);
 
-		if(resource.isLocked)
-			throw new DavException(HTTPStatus.locked, "Locked");
+		locks.check(destinationURL, ifHeader);
 
-		string destination = getHeader!"Destination"(req.headers);
-		string overwrite = getHeader!"Overwrite"(req.headers);
-
-		res.statusCode = resource.copy(URL(destination), overwrite == "T");
+		res.statusCode = resource.copy(destinationURL, overwrite == "T");
 
 		res.writeBody("", "text/plain");
 	}
 }
-
 
 HTTPServerRequestDelegate serveDav(T : Dav)(Path path) {
 	auto dav = new T;
@@ -681,6 +646,8 @@ HTTPServerRequestDelegate serveDav(T : Dav)(Path path) {
 				dav.options(req, res);
 			} else if(req.method == HTTPMethod.PROPFIND) {
 				dav.propfind(req, res);
+			} else if(req.method == HTTPMethod.HEAD) {
+				dav.head(req, res);
 			} else if(req.method == HTTPMethod.GET) {
 				dav.get(req, res);
 			} else if(req.method == HTTPMethod.PUT) {

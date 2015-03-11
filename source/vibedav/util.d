@@ -18,8 +18,25 @@ import std.digest.md;
 import std.datetime;
 import std.conv : to;
 
+
+string getEtag(Path path) {
+	auto pathstr = path.toNativeString();
+
+	FileInfo dirent;
+	try dirent = getFileInfo(pathstr);
+	catch(Exception){
+		throw new HTTPStatusException(HTTPStatus.InternalServerError, "Failed to get information for the file due to a file system error.");
+	}
+
+	auto lastModified = toRFC822DateTimeString(dirent.timeModified.toUTC());
+
+	auto etag = hexDigest!MD5(pathstr ~ ":" ~ lastModified ~ ":" ~ to!string(dirent.size)).idup;
+
+	return etag;
+}
+
 /// Copied from vibe. Do some refactor maybe, include this in the framework
-void sendRawFile(HTTPServerRequest req, HTTPServerResponse res, Path path, HTTPFileServerSettings settings)
+void sendRawFile(HTTPServerRequest req, HTTPServerResponse res, Path path, HTTPFileServerSettings settings, bool sendHeadersOnly = false)
 {
 	auto pathstr = path.toNativeString();
 
@@ -43,7 +60,7 @@ void sendRawFile(HTTPServerRequest req, HTTPServerResponse res, Path path, HTTPF
 
 	auto lastModified = toRFC822DateTimeString(dirent.timeModified.toUTC());
 	// simple etag generation
-	auto etag = "\"" ~ hexDigest!MD5(pathstr ~ ":" ~ lastModified ~ ":" ~ to!string(dirent.size)).idup ~ "\"";
+	auto etag = "\"" ~ getEtag(path) ~ "\"";
 
 	res.headers["Last-Modified"] = lastModified;
 	res.headers["Etag"] = etag;
@@ -129,8 +146,11 @@ void sendRawFile(HTTPServerRequest req, HTTPServerResponse res, Path path, HTTPF
 	}
 	scope(exit) fil.close();
 
-	if (pce && !encodedFilepath.length)
-		res.bodyWriter.write(fil);
-	else res.writeRawBody(fil);
+	if(!sendHeadersOnly) {
+		if (pce && !encodedFilepath.length)
+			res.bodyWriter.write(fil);
+		else res.writeRawBody(fil);
+	}
+
 	logTrace("sent file %d, %s!", fil.size, res.headers["Content-Type"]);
 }

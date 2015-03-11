@@ -124,6 +124,11 @@ final class DavFileResource : DavResource {
 		statusCode = HTTPStatus.OK;
 	}
 
+	@property
+	override string eTag() {
+		return getEtag(filePath);
+	}
+
 	override DavResource[] getChildren(ulong depth = 1) {
 		DavResource[] list;
 

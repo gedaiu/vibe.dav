@@ -148,7 +148,6 @@ class DavResource {
 	URL url;
 
 	DavProp properties; //TODO: Maybe I should move this to Dav class, or other storage
-	HTTPStatus statusCode;
 
 	protected {
 		Dav dav;
@@ -232,7 +231,7 @@ class DavResource {
 			item.addChild(propStat);
 		}
 
-		item["d:status"] = `HTTP/1.1 ` ~ statusCode.to!int.to!string ~ ` ` ~ httpStatusText(statusCode);
+		item["d:status"] = `HTTP/1.1 200 ok`;
 
 		parent.addChild(item);
 	}
@@ -275,7 +274,6 @@ class DavResource {
 
 				foreach(prop; setList) {
 					foreach(string key, p; prop) {
-						writeln("set", key);
 						properties[key] = p;
 						result ~= `<d:propstat><d:prop>` ~ p.toString ~ `</d:prop>`;
 						HTTPStatus status = HTTPStatus.ok;
@@ -412,8 +410,9 @@ abstract class Dav : DavBase {
 			auto properties = document["propfind"]["prop"];
 
 			if(properties.length > 0)
-				foreach(string key, p; properties)
-					list[key ~ ":" ~ p.namespace] = true;
+				foreach(string key, p; properties) {
+					list[p.tagName ~ ":" ~ p.namespace] = true;
+				}
 
 			return list;
 		}
@@ -457,15 +456,19 @@ abstract class Dav : DavBase {
 		auto response = new PropfindResponse();
 		response.list ~= selectedResource;
 
-		if(selectedResource.isCollection)
+		if(selectedResource.isCollection) {
 			response.list ~= selectedResource.getChildren(depth);
+		}
 
 		res.statusCode = HTTPStatus.multiStatus;
 
-		if(requestedProperties.length == 0)
+		if(requestedProperties.length == 0) {
 			res.writeBody(response.toString, "application/xml");
-		else
+		}
+		else {
+			writeln("requestedProperties ", requestedProperties);
 			res.writeBody(response.toStringProps(requestedProperties), "application/xml");
+		}
 	}
 
 	void lock(HTTPServerRequest req, HTTPServerResponse res) {
@@ -481,11 +484,24 @@ abstract class Dav : DavBase {
 		auto resource = getOrCreateResource(req.fullURL, res.statusCode);
 
 		if(requestXml.length != 0) {
-			locks.check(req.fullURL, ifHeader);
 			currentLock = locks.create(resource, requestXml);
+
+			if(currentLock.scopeLock == DavLockInfo.Scope.sharedLock && locks.hasExclusiveLock(resource.fullURL))
+				throw new DavException(HTTPStatus.locked, "Already has an exclusive locked.");
+			else if(currentLock.scopeLock == DavLockInfo.Scope.exclusiveLock && locks.hasLock(resource.fullURL))
+				throw new DavException(HTTPStatus.locked, "Already locked.");
+			else if(currentLock.scopeLock == DavLockInfo.Scope.exclusiveLock)
+				locks.check(req.fullURL, ifHeader);
+
+			locks.add(currentLock);
 		} else if(requestXml.length == 0) {
 			string lockId = ifHeader.getAttr("", resource.href);
-			currentLock = locks[resource.fullURL, lockId];
+
+			auto tmpUrl = resource.url;
+			while(currentLock is null) {
+				currentLock = locks[tmpUrl.toString, lockId];
+				tmpUrl = tmpUrl.parentURL;
+			}
 		} else if(ifHeader.isEmpty) {
 			throw new DavException(HTTPStatus.internalServerError, "LOCK body expected.");
 		}
@@ -499,14 +515,24 @@ abstract class Dav : DavBase {
 		res.writeBody(currentLock.toString, "application/xml");
 	}
 
+	void unlock(HTTPServerRequest req, HTTPServerResponse res) {
+		string token = getHeader!"Lock-Token"(req.headers)[1..$-1];
+		auto resource = getResource(req.fullURL);
+
+		locks.remove(resource, token);
+
+		res.statusCode = HTTPStatus.noContent;
+		res.writeBody("", "plain/text");
+	}
+
 	void get(HTTPServerRequest req, HTTPServerResponse res) {
 		string path = getRequestPath(req);
 		res.statusCode = HTTPStatus.ok;
+		writeln("headers ", req.headers);
 
 		DavResource resource = getOrCreateResource(req.fullURL, res.statusCode);
 
 		sendRawFile(req, res, root ~ path[1..$], new HTTPFileServerSettings);
-
 		locks.setETag(resource.url, resource.eTag);
 	}
 
@@ -516,7 +542,6 @@ abstract class Dav : DavBase {
 
 		res.statusCode = HTTPStatus.ok;
 		sendRawFile(req, res, root ~ path[1..$], new HTTPFileServerSettings, true);
-		writeln("2.|"~res.headers["Etag"][1..$-1]~"|");
 		locks.setETag(resource.url, resource.eTag);
 	}
 
@@ -529,6 +554,8 @@ abstract class Dav : DavBase {
 		locks.check(req.fullURL, ifHeader);
 
 		auto content = req.bodyReader.readAll;
+		writeln("headers ", req.headers);
+		writeln("content length ", content.length);
 		resource.setContent(content);
 
 		locks.setETag(resource.url, resource.eTag);
@@ -541,8 +568,9 @@ abstract class Dav : DavBase {
 		string path = getRequestPath(req);
 		res.statusCode = HTTPStatus.ok;
 
-		DavResource resource = getResource(req.fullURL);
 		locks.check(req.fullURL, ifHeader);
+
+		DavResource resource = getResource(req.fullURL);
 
 		auto content = req.bodyReader.readAllUTF8;
 		auto xmlString = resource.propPatch(content);
@@ -583,7 +611,8 @@ abstract class Dav : DavBase {
 			throw new DavException(HTTPStatus.conflict, "Missing parent");
 
 		auto resource = getResource(url);
-		locks.check(req.fullURL, ifHeader);
+		locks.check(url.parentURL, ifHeader);
+		locks.check(url, ifHeader);
 
 		resource.remove();
 		res.writeBody("", "text/plain");
@@ -599,6 +628,8 @@ abstract class Dav : DavBase {
 
 		auto resource = getResource(req.fullURL);
 
+
+		locks.check(req.fullURL.parentURL, ifHeader);
 		locks.check(req.fullURL, ifHeader);
 		locks.check(destinationURL, ifHeader);
 
@@ -616,7 +647,9 @@ abstract class Dav : DavBase {
 
 		auto resource = getResource(req.fullURL);
 
+		locks.check(destinationURL.parentURL, ifHeader);
 		locks.check(destinationURL, ifHeader);
+
 
 		res.statusCode = resource.copy(destinationURL, overwrite == "T");
 
@@ -633,13 +666,15 @@ HTTPServerRequestDelegate serveDav(T : Dav)(Path path) {
 		try {
 
 			debug {
+				writeln("\n\n\n");
+				writeln(req.fullURL);
+
 				if("X-Litmus" in req.headers) {
-					writeln("\n\n\n");
-					writeln(req.fullURL);
 					writeln(req.headers["X-Litmus"]);
-					writeln("Method: ", req.method);
-					writeln("==========================");
 				}
+
+				writeln("Method: ", req.method);
+				writeln("==========================");
 			}
 
 			if(req.method == HTTPMethod.OPTIONS) {
@@ -656,6 +691,8 @@ HTTPServerRequestDelegate serveDav(T : Dav)(Path path) {
 				dav.proppatch(req, res);
 			} else if(req.method == HTTPMethod.LOCK) {
 				dav.lock(req, res);
+			} else if(req.method == HTTPMethod.UNLOCK) {
+				dav.unlock(req, res);
 			} else if(req.method == HTTPMethod.MKCOL) {
 				dav.mkcol(req, res);
 			} else if(req.method == HTTPMethod.DELETE) {

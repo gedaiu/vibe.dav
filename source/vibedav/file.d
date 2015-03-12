@@ -42,6 +42,8 @@ class FileDav : Dav {
 	override DavResource getResource(URL url) {
 		auto filePath = filePath(url);
 
+		writeln("=====filePath ", filePath);
+
 		if(!filePath.toString.exists)
 			throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
 
@@ -97,6 +99,8 @@ final class DavFileResource : DavResource {
 		FileInfo dirent;
 		auto pathstr = filePath.toNativeString();
 
+		writeln("pathstr == ", pathstr );
+
 		try dirent = getFileInfo(pathstr);
 		catch(Exception) {
 			throw new HTTPStatusException(HTTPStatus.InternalServerError,
@@ -120,8 +124,6 @@ final class DavFileResource : DavResource {
 		}
 
 		href = path.toString;
-
-		statusCode = HTTPStatus.OK;
 	}
 
 	@property
@@ -136,7 +138,7 @@ final class DavFileResource : DavResource {
 		string listPath = filePath.toString.decode;
 		string rootPath = fileRoot.toString.decode;
 
-		auto fileList = dirEntries( listPath, "*", SpanMode.shallow);
+		auto fileList = dirEntries(listPath, "*", SpanMode.shallow);
 
 		foreach(file; fileList) {
 			string fileName = baseName(file.name);

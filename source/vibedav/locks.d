@@ -54,6 +54,18 @@ class DavLockInfo {
 	static DavLockInfo fromXML(DavProp node) {
 		auto lock = new DavLockInfo;
 
+		writeln("NODE: ", node);
+		if("lockinfo" !in node || "lockscope" !in node["lockinfo"])
+			throw new DavException(HTTPStatus.preconditionFailed, "Lockinfo is missing.");
+
+		if("shared" in node["lockinfo"]["lockscope"])
+			lock.scopeLock = Scope.sharedLock;
+
+		if("locktype" in node["lockinfo"] && "write" in node["lockinfo"]["locktype"])
+			lock.isWrite = true;
+
+		lock.owner = node["lockinfo"]["owner"].value;
+
 		return lock;
 	}
 
@@ -152,7 +164,6 @@ class DavLockList {
 				bool conditionResult;
 
 				writeln("0.conditionResult:", conditionResult);
-				writeln("existLock ", conditionUrl, " ", ifCondition);
 
 				//check for conditions
 				bool result = existLock(conditionUrl, ifCondition.condition);
@@ -160,17 +171,11 @@ class DavLockList {
 					result = !result;
 
 				if(result) {
-					writeln("EXIST");
-					writeln("1.conditionResult:", conditionResult);
 					//check for etag
-					if(ifCondition.etag != "") {
+					if(ifCondition.etag != "")
 						conditionResult = hasEtag(conditionUrl, ifCondition.etag);
-						writeln("2.conditionResult:", conditionResult);
-					}
-					else {
+					else
 						conditionResult = true;
-						writeln("3.conditionResult:", conditionResult);
-					}
 				}
 
 				writeln("4.conditionResult:", conditionResult);
@@ -183,34 +188,53 @@ class DavLockList {
 		return partialResult;
 	}
 
-	bool checkLocks(URL url, bool[string] headerLocks) {
+	bool isLocked(URL url, bool[string] headerLocks, ulong depth) {
 		string path = url.path.toString;
 		string strUrl = url.toString;
 
+		writeln("1. isLocked ", url, " ", headerLocks);
 		//check if we have locks
-		if(strUrl !in locks && path == "/")
-			return true; // we don't have any lock
-		else if(strUrl !in locks)
-			return checkLocks(url.parentURL, headerLocks);
+		if(strUrl !in locks && path == "/") {
 
-		if(locks[strUrl].keys.length == 0)
-			return true; // we don't have any lock for the current url
+			writeln("2. isLocked");
+			return false; // we don't have any lock
+		}
+		else if(strUrl !in locks) {
 
-		foreach(string uuid, lock; locks[strUrl])
-			if(uuid in headerLocks)
-				return true;
+			writeln("3. isLocked");
+			return isLocked(url.parentURL, headerLocks, depth + 1);
+		} else {
+			if(locks[strUrl].keys.length == 0) {
+				writeln("4. isLocked");
+				return false; // we don't have any lock for the current url
+			}
 
-		return false;
+			foreach(string uuid, lock; locks[strUrl]) {
+				writeln("5. isLocked ", uuid ," in ", headerLocks ," && ", lock.depth ," < ", depth);
+				if(uuid in headerLocks && lock.depth <= depth) {
+					writeln("1.", url, " depth ", lock.depth ,"<=", depth);
+					return false;
+				}
+			}
+			writeln("6. isLocked ", locks);
+
+			foreach(string uuid, lock; locks[strUrl]) {
+				writeln("7. isLocked ", lock.depth ," < ", depth);
+				if(lock.depth < depth) {
+					writeln("8.", url, " depth ", lock.depth ,">=", depth);
+					return false;
+				}
+			}
+		}
+
+		return true;
 	}
 
 	bool check(URL url, IfHeader header = IfHeader()) {
-		writeln(1);
 		if(!checkCondition(url, header))
 			throw new DavException(HTTPStatus.preconditionFailed, "Precondition failes.");
 
-		writeln(2);
-
-		if(!checkLocks(url, header.getLocks(url.toString)))
+		if(isLocked(url, header.getLocks(url.toString), 0))
 			throw new DavException(HTTPStatus.locked, "Locked.");
 
 		return true;
@@ -221,9 +245,51 @@ class DavLockList {
 		auto lockInfo = DavLockInfo.fromXML(document);
 		lockInfo.rootURL = resource.fullURL;
 
-		locks[resource.fullURL][lockInfo.uuid] = lockInfo;
+		return lockInfo;
+	}
 
-		return locks[resource.fullURL][lockInfo.uuid];
+	void add(DavLockInfo lockInfo) {
+		locks[lockInfo.rootURL][lockInfo.uuid] = lockInfo;
+	}
+
+	void remove(DavResource resource, string token) {
+		string strUrl = resource.fullURL;
+		ulong index;
+
+		if(strUrl !in locks)
+			throw new DavException(HTTPStatus.conflict ,"The resource is already unlocked.");
+
+		if(token !in locks[strUrl])
+			throw new DavException(HTTPStatus.conflict ,"Invalid lock uuid.");
+
+		locks[resource.fullURL].remove(token);
+
+		if(locks[resource.fullURL].keys.length == 0)
+			locks.remove(resource.fullURL);
+	}
+
+	bool hasLock(string url) {
+		if(url !in locks)
+			return false;
+
+		if(locks[url].keys.length > 0)
+			return false;
+
+		return true;
+	}
+
+	bool hasExclusiveLock(string url) {
+		if(url !in locks)
+			return false;
+
+		foreach(string uuid, lock; locks[url]) {
+			if(lock.scopeLock == DavLockInfo.Scope.exclusiveLock){
+				writeln("EXCLUSIVE LOCK:", lock);
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	DavLockInfo opIndex(string path, string uuid) {

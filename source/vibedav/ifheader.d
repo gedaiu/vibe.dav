@@ -11,6 +11,7 @@ import tested;
 import vibedav.parser;
 
 import std.stdio;
+import std.string;
 import core.vararg;
 
 struct IfCondition {
@@ -111,15 +112,21 @@ struct IfHeader {
 	bool[string] getLocks(string url) {
 		bool[string] result;
 
-		if("" in list)
+		if("" in list) {
 			foreach(IfCondition ifCondition; list[""])
 				if(!ifCondition.isNot)
 					result[ifCondition.condition] = true;
+		}
 
-		if(url in list)
-			foreach(IfCondition ifCondition; list[url])
-				if(!ifCondition.isNot)
-					result[ifCondition.condition] = true;
+		foreach(u, urlList; list) {
+			if(url.indexOf(u) != -1)
+				foreach(IfCondition ifCondition; list[u])
+					if(!ifCondition.isNot)
+						result[ifCondition.condition] = true;
+		}
+
+		writeln("list = ", list);
+		writeln("getLocks = ", result);
 
 		return result;
 	}

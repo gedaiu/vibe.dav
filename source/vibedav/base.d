@@ -92,15 +92,13 @@ string getHeader(string name)(HeaderList headers) {
 		value.enforce!(["T", "F"]);
 	} else static if(name == "If") {
 		value = getHeaderValue(headers, name, "()");
+	} else static if(name == "Content-Length") {
+		value = getHeaderValue(headers, name, "0");
 	} else {
 		value = getHeaderValue(headers, name);
 	}
 
 	return value;
-}
-
-IfHeader getIfHeader(HTTPServerRequest req) {
-	return IfHeader.parse(getHeader!"If"(req.headers));
 }
 
 class DavException : Exception {
@@ -129,18 +127,6 @@ enum DavDepth : int {
 	one = 1,
 	infinity = 99
 };
-
-DavDepth getDepthHeader(HTTPServerRequest req) {
-	if("depth" in req.headers) {
-		string strDepth = getHeader!"Depth"(req.headers);
-
-		if(strDepth == "0") return DavDepth.zero;
-		if(strDepth == "1") return DavDepth.one;
-	}
-
-	return DavDepth.infinity;
-}
-
 
 /// Represents a general DAV resource
 class DavResource {
@@ -246,13 +232,10 @@ class DavResource {
 		return false;
 	}
 
-	string propPatch(string content) {
+	string propPatch(DavProp document) {
 		string description;
 		string result = `<?xml version="1.0" encoding="utf-8" ?><d:multistatus xmlns:d="DAV:"><d:response>`;
 		result ~= `<d:href>` ~ url.toString ~ `</d:href>`;
-
-		auto document = parseXMLProp(content);
-
 
 		//remove properties
 		auto updateList = [document].getTagChilds("propertyupdate");
@@ -319,10 +302,20 @@ class DavResource {
 		return HTTPStatus.ok;
 	}
 
-	abstract DavResource[] getChildren(ulong depth = 1);
-	abstract HTTPStatus move(URL newPath, bool overwrite = false);
-	abstract void setContent(const ubyte[] content);
-	@property abstract string eTag();
+
+	abstract {
+		DavResource[] getChildren(ulong depth = 1);
+		HTTPStatus move(URL newPath, bool overwrite = false);
+		void setContent(const ubyte[] content);
+
+		@property {
+			string eTag();
+			string mimeType();
+			SysTime lastModified();
+			ulong contentLength();
+			InputStream stream();
+		}
+	}
 }
 
 /// A structure that helps to create the propfind response
@@ -347,22 +340,174 @@ struct PropfindResponse {
 	}
 }
 
+
+/// The HTTP response wrapper
+struct DavResponse {
+	private {
+		HTTPServerResponse response;
+		string _content;
+	}
+
+	HTTPStatus statusCode = HTTPStatus.ok;
+
+	@property {
+		void content(string value) {
+			_content = value;
+		}
+
+		void mimeType(string value) {
+			response.headers["Content-Type"] = value;
+		}
+	}
+
+	this(HTTPServerResponse res) {
+		this.response = res;
+		this.response.headers["Content-Type"] = "text/plain";
+	}
+
+	void opIndexAssign(T)(T value, T key) {
+		static if(is( T == string )) {
+			response.headers[key] = value;
+		} else {
+			response.headers[key] = value.to!string;
+		}
+	}
+
+	void flush() {
+		writeln("this.response.headers ", this.response.headers);
+		response.statusCode = statusCode;
+		response.writeBody(_content, response.headers["Content-Type"]);
+	}
+
+	void flush(DavResource resource) {
+		response.statusCode = statusCode;
+		response.writeRawBody(resource.stream);
+	}
+}
+
+/// The HTTP request wrapper
+struct DavRequest {
+	private HTTPServerRequest request;
+
+	this(HTTPServerRequest req) {
+		request = req;
+	}
+
+	@property {
+		string path() {
+			return request.path;
+		}
+
+		string lockToken() {
+			return getHeader!"Lock-Token"(request.headers)[1..$-1];
+		}
+
+		DavDepth depth() {
+			if("depth" in request.headers) {
+				string strDepth = getHeader!"Depth"(request.headers);
+
+				if(strDepth == "0") return DavDepth.zero;
+				if(strDepth == "1") return DavDepth.one;
+			}
+
+			return DavDepth.infinity;
+		}
+
+		ulong contentLength() {
+			string value = getHeader!"Content-Length"(request.headers);
+			return value.to!ulong;
+		}
+
+		DavProp content() {
+			DavProp document;
+			string requestXml = cast(string)request.bodyReader.readAllUTF8;
+
+			if(requestXml.length > 0) {
+				try document = requestXml.parseXMLProp;
+				catch (DavPropException e)
+					throw new DavException(HTTPStatus.badRequest, "Invalid xml body.");
+			}
+
+			return document;
+		}
+
+		ubyte[] rawContent() {
+			return request.bodyReader.readAll;
+		}
+
+		URL url() {
+			return request.fullURL;
+		}
+
+		string requestUrl() {
+			return request.requestURL;
+		}
+
+		Duration timeout() {
+			Duration t;
+
+			string strTimeout = getHeader!"Timeout"(request.headers);
+			auto secIndex = strTimeout.indexOf("Second-");
+
+			if(strTimeout.indexOf("Infinite") != -1) {
+				t = dur!"hours"(24);
+			} else if(secIndex != -1) {
+				auto val = strTimeout[secIndex+7..$].to!int;
+				t = dur!"seconds"(val);
+			} else {
+				throw new DavException(HTTPStatus.internalServerError, "Invalid timeout value");
+			}
+
+			return t;
+		}
+
+		IfHeader ifCondition() {
+			return IfHeader.parse(getHeader!"If"(request.headers));
+		}
+
+
+		URL destination() {
+			return URL(getHeader!"Destination"(request.headers));
+		}
+
+		bool overwrite() {
+			return getHeader!"Overwrite"(request.headers) == "T";
+		}
+	}
+
+	bool ifModifiedSince(DavResource resource) {
+		if( auto pv = "If-Modified-Since" in request.headers )
+			if( *pv == toRFC822DateTimeString(resource.lastModified) )
+				return false;
+
+		return true;
+	}
+
+	bool ifNoneMatch(DavResource resource) {
+		if( auto pv = "If-None-Match" in request.headers )
+			if ( *pv == resource.eTag )
+				return false;
+
+		return true;
+	}
+}
+
 interface IDav {
 	abstract {
 		DavResource getResource(URL url);
 		DavResource createCollection(URL url);
 		DavResource createProperty(URL url);
 
-		void options(HTTPServerRequest req, HTTPServerResponse res);
-		void propfind(HTTPServerRequest req, HTTPServerResponse res);
-		void lock(HTTPServerRequest req, HTTPServerResponse res);
-		void get(HTTPServerRequest req, HTTPServerResponse res);
-		void put(HTTPServerRequest req, HTTPServerResponse res);
-		void proppatch(HTTPServerRequest req, HTTPServerResponse res);
-		void mkcol(HTTPServerRequest req, HTTPServerResponse res) ;
-		void remove(HTTPServerRequest req, HTTPServerResponse res);
-		void move(HTTPServerRequest req, HTTPServerResponse res);
-		void copy(HTTPServerRequest req, HTTPServerResponse res);
+		void options(DavRequest request, DavResponse response);
+		void propfind(DavRequest request, DavResponse response);
+		void lock(DavRequest request, DavResponse response);
+		void get(DavRequest request, DavResponse response);
+		void put(DavRequest request, DavResponse response);
+		void proppatch(DavRequest request, DavResponse response);
+		void mkcol(DavRequest request, DavResponse response) ;
+		void remove(DavRequest request, DavResponse response);
+		void move(DavRequest request, DavResponse response);
+		void copy(DavRequest request, DavResponse response);
 	}
 }
 
@@ -416,198 +561,184 @@ abstract class Dav : DavBase {
 
 			return list;
 		}
-
-		string getRequestPath(HTTPServerRequest req) {
-			string path = req.path;
-			return path;
-		}
 	}
 
 
-	void options(HTTPServerRequest req, HTTPServerResponse res) {
-		string path = req.path;
+	void options(DavRequest request, DavResponse response) {
+		string path = request.path;
 
-		res.headers["Accept-Ranges"] = "bytes";
-		res.headers["DAV"] = "1,2,3";
-		res.headers["Allow"] = "OPTIONS, GET, HEAD, DELETE, PROPFIND, PUT, PROPPATCH, COPY, MOVE, LOCK, UNLOCK";
-		res.headers["MS-Author-Via"] = "DAV";
+		response["Accept-Ranges"] = "bytes";
+		response["DAV"] = "1,2,3";
+		response["Allow"] = "OPTIONS, GET, HEAD, DELETE, PROPFIND, PUT, PROPPATCH, COPY, MOVE, LOCK, UNLOCK";
+		response["MS-Author-Via"] = "DAV";
 
-		res.writeBody("", "text/plain");
+		response.flush;
 	}
 
-	void propfind(HTTPServerRequest req, HTTPServerResponse res) {
-		string path = getRequestPath(req);
-		int depth = getDepthHeader(req).to!int;
-		bool[string] requestedProperties;
+	void propfind(DavRequest request, DavResponse response) {
+		bool[string] requestedProperties = propList(request.content);
 
-		string requestXml = cast(string)req.bodyReader.readAllUTF8;
+		auto selectedResource = getResource(request.url);
 
-		if(requestXml.length > 0) {
-			DavProp document;
-			try document = requestXml.parseXMLProp;
-			catch (DavPropException e)
-				throw new DavException(HTTPStatus.badRequest, "Invalid xml body.");
+		auto pfResponse = new PropfindResponse();
+		pfResponse.list ~= selectedResource;
 
-			requestedProperties = propList(document);
-		}
+		if(selectedResource.isCollection)
+			pfResponse.list ~= selectedResource.getChildren(request.depth);
 
-		auto selectedResource = getResource(req.fullURL);
+		response.statusCode = HTTPStatus.multiStatus;
+		response.mimeType = "application/xml";
 
-		auto response = new PropfindResponse();
-		response.list ~= selectedResource;
-
-		if(selectedResource.isCollection) {
-			response.list ~= selectedResource.getChildren(depth);
-		}
-
-		res.statusCode = HTTPStatus.multiStatus;
 
 		if(requestedProperties.length == 0) {
-			res.writeBody(response.toString, "application/xml");
+			response.content = pfResponse.toString;
+		} else {
+			response.content = pfResponse.toStringProps(requestedProperties);
 		}
-		else {
-			writeln("requestedProperties ", requestedProperties);
-			res.writeBody(response.toStringProps(requestedProperties), "application/xml");
-		}
+
+		response.flush;
 	}
 
-	void lock(HTTPServerRequest req, HTTPServerResponse res) {
-		auto ifHeader = getIfHeader(req);
-		string timeout = getHeader!"Timeout"(req.headers);
-
-		string path = getRequestPath(req);
-		ulong depth = getDepthHeader(req);
+	void lock(DavRequest request, DavResponse response) {
+		auto ifHeader = request.ifCondition;
 
 		DavLockInfo currentLock;
 
-		string requestXml = cast(string)req.bodyReader.readAllUTF8;
-		auto resource = getOrCreateResource(req.fullURL, res.statusCode);
+		auto resource = getOrCreateResource(request.url, response.statusCode);
 
-		if(requestXml.length != 0) {
-			currentLock = locks.create(resource, requestXml);
+		if(request.contentLength != 0) {
+			currentLock = DavLockInfo.fromXML(request.content, resource);
 
 			if(currentLock.scopeLock == DavLockInfo.Scope.sharedLock && locks.hasExclusiveLock(resource.fullURL))
 				throw new DavException(HTTPStatus.locked, "Already has an exclusive locked.");
 			else if(currentLock.scopeLock == DavLockInfo.Scope.exclusiveLock && locks.hasLock(resource.fullURL))
 				throw new DavException(HTTPStatus.locked, "Already locked.");
 			else if(currentLock.scopeLock == DavLockInfo.Scope.exclusiveLock)
-				locks.check(req.fullURL, ifHeader);
+				locks.check(request.url, ifHeader);
 
 			locks.add(currentLock);
-		} else if(requestXml.length == 0) {
-			string lockId = ifHeader.getAttr("", resource.href);
+		} else if(request.contentLength == 0) {
+			string uuid = ifHeader.getAttr("", resource.href);
 
 			auto tmpUrl = resource.url;
 			while(currentLock is null) {
-				currentLock = locks[tmpUrl.toString, lockId];
+				currentLock = locks[tmpUrl.toString, uuid];
 				tmpUrl = tmpUrl.parentURL;
 			}
-		} else if(ifHeader.isEmpty) {
+		} else if(ifHeader.isEmpty)
 			throw new DavException(HTTPStatus.internalServerError, "LOCK body expected.");
-		}
 
 		if(currentLock is null)
 			throw new DavException(HTTPStatus.internalServerError, "LOCK not created.");
 
-		currentLock.setTimeout(timeout);
+		currentLock.timeout = request.timeout;
 
-		res.headers["Lock-Token"] = "<"~currentLock.uuid~">";
-		res.writeBody(currentLock.toString, "application/xml");
+		response["Lock-Token"] = "<" ~ currentLock.uuid ~ ">";
+		response.mimeType = "application/xml";
+		response.content = currentLock.toString;
+		response.flush;
 	}
 
-	void unlock(HTTPServerRequest req, HTTPServerResponse res) {
-		string token = getHeader!"Lock-Token"(req.headers)[1..$-1];
-		auto resource = getResource(req.fullURL);
+	void unlock(DavRequest request, DavResponse response) {
+		auto resource = getResource(request.url);
 
-		locks.remove(resource, token);
+		locks.remove(resource, request.lockToken);
 
-		res.statusCode = HTTPStatus.noContent;
-		res.writeBody("", "plain/text");
+		response.statusCode = HTTPStatus.noContent;
+		response.flush;
 	}
 
-	void get(HTTPServerRequest req, HTTPServerResponse res) {
-		string path = getRequestPath(req);
-		res.statusCode = HTTPStatus.ok;
-		writeln("headers ", req.headers);
+	void get(DavRequest request, DavResponse response) {
+		DavResource resource = getResource(request.url);
 
-		DavResource resource = getOrCreateResource(req.fullURL, res.statusCode);
+		response["Etag"] = "\"" ~ resource.eTag ~ "\"";
+		response["Last-Modified"] = toRFC822DateTimeString(resource.lastModified);
+		response["Content-Type"] = resource.mimeType;
+		response["Content-Length"] = resource.contentLength.to!string;
 
-		sendRawFile(req, res, root ~ path[1..$], new HTTPFileServerSettings);
+		if(!request.ifModifiedSince(resource) || !request.ifNoneMatch(resource)) {
+			response.statusCode = HTTPStatus.NotModified;
+			response.flush;
+			return;
+		}
+
+		response.flush(resource);
 		locks.setETag(resource.url, resource.eTag);
 	}
 
-	void head(HTTPServerRequest req, HTTPServerResponse res) {
-		string path = getRequestPath(req);
-		DavResource resource = getResource(req.fullURL);
+	void head(DavRequest request, DavResponse response) {
+		DavResource resource = getResource(request.url);
 
-		res.statusCode = HTTPStatus.ok;
-		sendRawFile(req, res, root ~ path[1..$], new HTTPFileServerSettings, true);
+		response["Etag"] = "\"" ~ resource.eTag ~ "\"";
+		response["Last-Modified"] = toRFC822DateTimeString(resource.lastModified);
+		response["Content-Type"] = resource.mimeType;
+		response["Content-Length"] = resource.contentLength.to!string;
+
+		if(!request.ifModifiedSince(resource) || !request.ifNoneMatch(resource)) {
+			response.statusCode = HTTPStatus.NotModified;
+			response.flush;
+			return;
+		}
+
+		response.flush;
 		locks.setETag(resource.url, resource.eTag);
 	}
 
-	void put(HTTPServerRequest req, HTTPServerResponse res) {
-		auto ifHeader = getIfHeader(req);
-		string path = getRequestPath(req);
+	void put(DavRequest request, DavResponse response) {
+		DavResource resource = getOrCreateResource(request.url, response.statusCode);
 
-		DavResource resource = getOrCreateResource(req.fullURL, res.statusCode);
+		locks.check(request.url, request.ifCondition);
 
-		locks.check(req.fullURL, ifHeader);
-
-		auto content = req.bodyReader.readAll;
-		writeln("headers ", req.headers);
-		writeln("content length ", content.length);
+		auto content = request.rawContent;
 		resource.setContent(content);
 
 		locks.setETag(resource.url, resource.eTag);
 
-		res.writeBody("", "text/plain");
+		response.statusCode = HTTPStatus.created;
+		response.flush;
 	}
 
-	void proppatch(HTTPServerRequest req, HTTPServerResponse res) {
-		auto ifHeader = getIfHeader(req);
-		string path = getRequestPath(req);
-		res.statusCode = HTTPStatus.ok;
+	void proppatch(DavRequest request, DavResponse response) {
+		auto ifHeader = request.ifCondition;
+		response.statusCode = HTTPStatus.ok;
 
-		locks.check(req.fullURL, ifHeader);
+		locks.check(request.url, ifHeader);
 
-		DavResource resource = getResource(req.fullURL);
+		DavResource resource = getResource(request.url);
 
-		auto content = req.bodyReader.readAllUTF8;
-		auto xmlString = resource.propPatch(content);
+		auto xmlString = resource.propPatch(request.content);
 
-		res.writeBody(xmlString, "text/plain");
+		response.content = xmlString;
+		response.flush;
 	}
 
-	void mkcol(HTTPServerRequest req, HTTPServerResponse res) {
-		auto ifHeader = getIfHeader(req);
-		string path = getRequestPath(req);
+	void mkcol(DavRequest request, DavResponse response) {
+		auto ifHeader = request.ifCondition;
 
-		auto content = req.bodyReader.readAll;
-		if(content.length > 0)
+		if(request.contentLength > 0)
 			throw new DavException(HTTPStatus.unsupportedMediaType, "Body must be empty");
 
 		try {
-			auto resource = getResource(req.fullURL.parentURL);
+			auto resource = getResource(request.url.parentURL);
 		} catch (DavException e) {
 			if(e.status == HTTPStatus.notFound)
 				throw new DavException(HTTPStatus.conflict, "Missing parent");
 		}
 
-		locks.check(req.fullURL, ifHeader);
+		locks.check(request.url, ifHeader);
 
-		res.statusCode = HTTPStatus.created;
-		createCollection(req.fullURL);
-		res.writeBody("", "text/plain");
+		response.statusCode = HTTPStatus.created;
+		createCollection(request.url);
+		response.flush;
 	}
 
-	void remove(HTTPServerRequest req, HTTPServerResponse res) {
-		auto ifHeader = getIfHeader(req);
-		string path = getRequestPath(req);
-		auto url = req.fullURL;
+	void remove(DavRequest request, DavResponse response) {
+		auto ifHeader = request.ifCondition;
+		auto url = request.url;
 
-		res.statusCode = HTTPStatus.noContent;
+		response.statusCode = HTTPStatus.noContent;
 
-		if(url.anchor != "" || req.requestURL.indexOf("#") != -1)
+		if(url.anchor != "" || request.requestUrl.indexOf("#") != -1)
 			throw new DavException(HTTPStatus.conflict, "Missing parent");
 
 		auto resource = getResource(url);
@@ -615,45 +746,29 @@ abstract class Dav : DavBase {
 		locks.check(url, ifHeader);
 
 		resource.remove();
-		res.writeBody("", "text/plain");
+		response.flush;
 	}
 
-	void move(HTTPServerRequest req, HTTPServerResponse res) {
-		string destination = getHeader!"Destination"(req.headers);
-		string overwrite = getHeader!"Overwrite"(req.headers);
+	void move(DavRequest request, DavResponse response) {
+		auto ifHeader = request.ifCondition;
+		auto resource = getResource(request.url);
 
-		auto ifHeader = getIfHeader(req);
-		string path = getRequestPath(req);
-		auto destinationURL = URL(destination);
+		locks.check(request.url.parentURL, ifHeader);
+		locks.check(request.url, ifHeader);
+		locks.check(request.destination, ifHeader);
 
-		auto resource = getResource(req.fullURL);
-
-
-		locks.check(req.fullURL.parentURL, ifHeader);
-		locks.check(req.fullURL, ifHeader);
-		locks.check(destinationURL, ifHeader);
-
-		res.statusCode = resource.move(destinationURL, overwrite == "T");
-
-		res.writeBody("", "text/plain");
+		response.statusCode = resource.move(request.destination, request.overwrite);
+		response.flush;
 	}
 
-	void copy(HTTPServerRequest req, HTTPServerResponse res) {
-		auto ifHeader = getIfHeader(req);
-		string destination = getHeader!"Destination"(req.headers);
-		string overwrite = getHeader!"Overwrite"(req.headers);
-		string path = getRequestPath(req);
-		auto destinationURL = URL(destination);
+	void copy(DavRequest request, DavResponse response) {
+		auto resource = getResource(request.url);
 
-		auto resource = getResource(req.fullURL);
+		locks.check(request.destination.parentURL, request.ifCondition);
+		locks.check(request.destination, request.ifCondition);
 
-		locks.check(destinationURL.parentURL, ifHeader);
-		locks.check(destinationURL, ifHeader);
-
-
-		res.statusCode = resource.copy(destinationURL, overwrite == "T");
-
-		res.writeBody("", "text/plain");
+		response.statusCode = resource.copy(request.destination, request.overwrite);
+		response.flush;
 	}
 }
 
@@ -677,30 +792,33 @@ HTTPServerRequestDelegate serveDav(T : Dav)(Path path) {
 				writeln("==========================");
 			}
 
+			DavRequest request = DavRequest(req);
+			DavResponse response = DavResponse(res);
+
 			if(req.method == HTTPMethod.OPTIONS) {
-				dav.options(req, res);
+				dav.options(request, response);
 			} else if(req.method == HTTPMethod.PROPFIND) {
-				dav.propfind(req, res);
+				dav.propfind(request, response);
 			} else if(req.method == HTTPMethod.HEAD) {
-				dav.head(req, res);
+				dav.head(request, response);
 			} else if(req.method == HTTPMethod.GET) {
-				dav.get(req, res);
+				dav.get(request, response);
 			} else if(req.method == HTTPMethod.PUT) {
-				dav.put(req, res);
+				dav.put(request, response);
 			} else if(req.method == HTTPMethod.PROPPATCH) {
-				dav.proppatch(req, res);
+				dav.proppatch(request, response);
 			} else if(req.method == HTTPMethod.LOCK) {
-				dav.lock(req, res);
+				dav.lock(request, response);
 			} else if(req.method == HTTPMethod.UNLOCK) {
-				dav.unlock(req, res);
+				dav.unlock(request, response);
 			} else if(req.method == HTTPMethod.MKCOL) {
-				dav.mkcol(req, res);
+				dav.mkcol(request, response);
 			} else if(req.method == HTTPMethod.DELETE) {
-				dav.remove(req, res);
+				dav.remove(request, response);
 			} else if(req.method == HTTPMethod.COPY) {
-				dav.copy(req, res);
+				dav.copy(request, response);
 			} else if(req.method == HTTPMethod.MOVE) {
-				dav.move(req, res);
+				dav.move(request, response);
 			} else {
 				res.statusCode = HTTPStatus.notImplemented;
 				res.writeBody("", "text/plain");

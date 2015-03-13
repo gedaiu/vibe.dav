@@ -80,6 +80,7 @@ final class DavFileResource : DavResource {
 		Path resPath;
 		Path fileRoot;
 		Path filePath;
+		FileInfo dirent;
 	}
 
 	this(Dav dav, Path root, URL url) {
@@ -96,7 +97,6 @@ final class DavFileResource : DavResource {
 		fileRoot = root;
 		filePath = root ~ path.toString[1..$];
 
-		FileInfo dirent;
 		auto pathstr = filePath.toNativeString();
 
 		writeln("pathstr == ", pathstr );
@@ -126,9 +126,31 @@ final class DavFileResource : DavResource {
 		href = path.toString;
 	}
 
-	@property
-	override string eTag() {
-		return getEtag(filePath);
+	@property override {
+		string eTag() {
+			auto pathstr = filePath.toNativeString();
+			auto etag = hexDigest!MD5(pathstr ~ ":" ~ toRFC822DateTimeString(lastModified) ~ ":" ~ contentLength.to!string.idup);
+			return etag.to!string;
+		}
+
+		string mimeType() {
+			return getMimeTypeForFile(filePath.toString);
+		}
+
+		SysTime lastModified() {
+			return dirent.timeModified.toUTC;
+		}
+
+		ulong contentLength() {
+			return dirent.size;
+		}
+
+		InputStream stream() {
+			FileStream fil;
+			fil = openFile(filePath.toString);
+
+			return fil;
+		}
 	}
 
 	override DavResource[] getChildren(ulong depth = 1) {

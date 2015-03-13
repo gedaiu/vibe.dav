@@ -33,12 +33,13 @@ class DavLockInfo {
 		sharedLock
 	};
 
+	private SysTime _timeout;
+
 	string rootURL;
 
 	Scope scopeLock;
 	bool isWrite;
 	string owner;
-	SysTime timeout;
 	string uuid;
 	DavDepth depth;
 
@@ -69,21 +70,18 @@ class DavLockInfo {
 		return lock;
 	}
 
-	/// Set the timeout based on the request header
-	void setTimeout(string timeoutHeader) {
-		if(timeoutHeader.indexOf("Infinite") != -1) {
-			timeout = SysTime.max;
-			return;
-		}
+	static DavLockInfo fromXML(DavProp node, DavResource resource) {
+		auto lock = DavLockInfo.fromXML(node);
+		lock.rootURL = resource.fullURL;
 
-		auto secIndex = timeoutHeader.indexOf("Second-");
-		if(secIndex != -1) {
-			auto val = timeoutHeader[secIndex+7..$].to!int;
-			timeout = Clock.currTime + dur!"seconds"(val);
-			return;
-		}
+		return lock;
+	}
 
-		throw new DavException(HTTPStatus.internalServerError, "Invalid timeout value");
+	@property {
+		/// Set the timeout based on the request header
+		void timeout(Duration val) {
+			_timeout = Clock.currTime + val;
+		}
 	}
 
 	override string toString() {
@@ -106,10 +104,10 @@ class DavLockInfo {
 		if(owner != "")
 			a ~= `<D:owner><D:href>`~owner~`</D:href></D:owner>`;
 
-		if(timeout == SysTime.max)
+		if(_timeout == SysTime.max)
 			a ~= `<D:timeout>Infinite</D:timeout>`;
 		else {
-			long seconds = (timeout - Clock.currTime).total!"seconds";
+			long seconds = (_timeout - Clock.currTime).total!"seconds";
 			a ~= `<D:timeout>Second-` ~ seconds.to!string ~ `</D:timeout>`;
 		}
 
@@ -238,14 +236,6 @@ class DavLockList {
 			throw new DavException(HTTPStatus.locked, "Locked.");
 
 		return true;
-	}
-
-	DavLockInfo create(DavResource resource, string requestXml) {
-		DavProp document = requestXml.parseXMLProp;
-		auto lockInfo = DavLockInfo.fromXML(document);
-		lockInfo.rootURL = resource.fullURL;
-
-		return lockInfo;
 	}
 
 	void add(DavLockInfo lockInfo) {

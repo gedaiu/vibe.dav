@@ -125,9 +125,6 @@ struct IfHeader {
 						result[ifCondition.condition] = true;
 		}
 
-		writeln("list = ", list);
-		writeln("getLocks = ", result);
-
 		return result;
 	}
 

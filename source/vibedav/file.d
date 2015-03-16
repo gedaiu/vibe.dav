@@ -17,6 +17,9 @@ import vibe.http.fileserver;
 import vibe.http.router : URLRouter;
 import vibe.stream.operations;
 import vibe.utils.dictionarylist;
+import vibe.stream.stdio;
+import vibe.stream.memory;
+import vibe.utils.memory;
 
 import std.conv : to;
 import std.algorithm;
@@ -25,7 +28,7 @@ import std.path;
 import std.digest.md;
 import std.datetime;
 import std.string;
-import std.stdio : writeln; //todo: remove this
+import std.stdio;
 import std.typecons;
 import std.uri;
 import std.uuid;
@@ -41,8 +44,6 @@ class FileDav : Dav {
 
 	override DavResource getResource(URL url) {
 		auto filePath = filePath(url);
-
-		writeln("=====filePath ", filePath);
 
 		if(!filePath.toString.exists)
 			throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
@@ -67,7 +68,8 @@ class FileDav : Dav {
 		if(filePath.toString.exists)
 			throw new DavException(HTTPStatus.methodNotAllowed, "plain/text");
 
-		filePath.toString.write("");
+		auto f = new File(filePath.toString, "w");
+		f.close;
 
 		return new DavFileResource(this, root, url);
 	}
@@ -80,7 +82,6 @@ final class DavFileResource : DavResource {
 		Path resPath;
 		Path fileRoot;
 		Path filePath;
-		FileInfo dirent;
 	}
 
 	this(Dav dav, Path root, URL url) {
@@ -99,27 +100,18 @@ final class DavFileResource : DavResource {
 
 		auto pathstr = filePath.toNativeString();
 
-		writeln("pathstr == ", pathstr );
+		if(!pathstr.exists)
+			throw new DavException(HTTPStatus.notFound, "File not found.");
 
-		try dirent = getFileInfo(pathstr);
-		catch(Exception) {
-			throw new HTTPStatusException(HTTPStatus.InternalServerError,
-				"Failed to get information for the file due to a file system error.");
-		}
+		FileInfo dirent = getFileInfo(pathstr);
 
-		auto lastModified = toRFC822DateTimeString(dirent.timeModified.toUTC());
 		auto creationDate = toRFC822DateTimeString(dirent.timeCreated.toUTC());
 		isCollection = pathstr.isDir;
 
-		auto etag = "\"" ~ hexDigest!MD5(pathstr ~ ":" ~ lastModified ~ ":" ~ to!string(dirent.size)).idup ~ "\"";
-
 		string resType = "";
-		properties["d:getetag"] = new DavProp(etag[1..$-1]);
-		properties["d:getlastmodified"] = new DavProp(lastModified);
 		properties["d:creationdate"] = new DavProp(creationDate);
 
 		if(!pathstr.isDir) {
-			properties["d:getcontentlength"] = new DavProp(dirent.size.to!string);
 			properties["d:getcontenttype"] = new DavProp(getMimeTypeForFile(pathstr));
 		}
 
@@ -128,8 +120,23 @@ final class DavFileResource : DavResource {
 
 	@property override {
 		string eTag() {
+			import std.digest.crc;
+			import std.stdio;
+
 			auto pathstr = filePath.toNativeString();
-			auto etag = hexDigest!MD5(pathstr ~ ":" ~ toRFC822DateTimeString(lastModified) ~ ":" ~ contentLength.to!string.idup);
+			string fileHash = pathstr;
+
+			if(!pathstr.isDir) {
+				auto f = File(pathstr, "r");
+				foreach (ubyte[] buffer; f.byChunk(4096)) {
+					ubyte[4] hash = crc32Of(buffer);
+					fileHash ~= crcHexString(hash);
+			    }
+			}
+
+			fileHash ~= lastModified.toISOExtString ~ contentLength.to!string;
+
+			auto etag = hexDigest!MD5(pathstr ~ fileHash);
 			return etag.to!string;
 		}
 
@@ -138,10 +145,12 @@ final class DavFileResource : DavResource {
 		}
 
 		SysTime lastModified() {
+			FileInfo dirent = getFileInfo(filePath.toNativeString);
 			return dirent.timeModified.toUTC;
 		}
 
 		ulong contentLength() {
+			FileInfo dirent = getFileInfo(filePath.toNativeString);
 			return dirent.size;
 		}
 
@@ -196,8 +205,8 @@ final class DavFileResource : DavResource {
 	@testName("exists")
 	unittest {
 		"level1/level2".mkdirRecurse;
-		"level1/level2/testFile1.txt".write("hello!");
-		"level1/level2/testFile2.txt".write("hello!");
+		std.file.write("level1/level2/testFile1.txt", "hello!");
+		std.file.write("level1/level2/testFile2.txt", "hello!");
 
 		auto dav = new FileDav;
 		dav.root = Path("");
@@ -269,25 +278,25 @@ final class DavFileResource : DavResource {
 
 	@testName("copy file")
 	unittest {
-		"testFile.txt".write("hello!");
+		std.file.write("testFile.txt", "hello!");
 
 		auto dav = new FileDav();
 		dav.root = Path("");
 
 		auto file = dav.getResource(URL("http://127.0.0.1/testFile.txt"));
-		if("testCopy.txt".exists) "testCopy.txt".remove;
+		if("testCopy.txt".exists) std.file.remove("testCopy.txt");
 		file.copy(URL("http://127.0.0.1/testCopy.txt"), true);
 
 		assert("hello!" == "testCopy.txt".read);
 
-		"testFile.txt".remove;
-		"testCopy.txt".remove;
+		std.file.remove("testFile.txt");
+		std.file.remove("testCopy.txt");
 	}
 
 	@testName("copy dir")
 	unittest {
 		"level1/level2".mkdirRecurse;
-		"level1/level2/testFile.txt".write("hello!");
+		std.file.write("level1/level2/testFile.txt", "hello!");
 
 		auto dav = new FileDav();
 		dav.root = Path("");
@@ -295,15 +304,35 @@ final class DavFileResource : DavResource {
 		auto file = dav.getResource(URL("http://127.0.0.1/level1"));
 		file.copy(URL("http://127.0.0.1/_test"));
 
-		assert("hello!" == "_test/level2/testFile.txt".read);
+		assert("hello!" == read("_test/level2/testFile.txt"));
 
 		"level1".rmdirRecurse;
 		"_test".rmdirRecurse;
 	}
 
-	override void setContent(const ubyte[] content) {
-		immutable string p = filePath.to!string;
-		p.write(content);
+	override {
+		void setContent(const ubyte[] content) {
+			immutable string p = filePath.to!string;
+			std.stdio.write(p, content);
+		}
+
+		void setContent(InputStream content, ulong size) {
+			auto strPath = filePath.to!string;
+			auto tmpPath = filePath.to!string ~ ".tmp";
+			auto tmpFile = File(tmpPath, "w");
+
+			while(!content.empty) {
+				auto leastSize = content.leastSize;
+				ubyte[] buf;
+				buf.length = leastSize;
+				content.read(buf);
+				tmpFile.rawWrite(buf);
+			}
+
+			tmpFile.flush;
+			std.file.copy(tmpPath, strPath);
+			std.file.remove(tmpPath);
+		}
 	}
 }
 

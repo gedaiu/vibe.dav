@@ -55,7 +55,6 @@ class DavLockInfo {
 	static DavLockInfo fromXML(DavProp node) {
 		auto lock = new DavLockInfo;
 
-		writeln("NODE: ", node);
 		if("lockinfo" !in node || "lockscope" !in node["lockinfo"])
 			throw new DavException(HTTPStatus.preconditionFailed, "Lockinfo is missing.");
 
@@ -85,36 +84,34 @@ class DavLockInfo {
 	}
 
 	override string toString() {
-		string a = `<?xml version="1.0" encoding="utf-8" ?>`;
-		a ~= `<D:prop xmlns:D="DAV:"><D:lockdiscovery><D:activelock>`;
+		string a = `<d:activelock>`;
 
 		if(isWrite)
-			a ~= `<D:locktype><D:write/></D:locktype>`;
+			a ~= `<d:locktype><d:write/></d:locktype>`;
 
 		if(scopeLock == Scope.exclusiveLock)
-			a ~= `<D:lockscope><D:exclusive/></D:lockscope>`;
+			a ~= `<d:lockscope><d:exclusive/></d:lockscope>`;
 		else if(scopeLock == Scope.sharedLock)
-			a ~= `<D:lockscope><D:shared/></D:lockscope>`;
+			a ~= `<d:lockscope><d:shared/></d:lockscope>`;
 
 		if(depth == DavDepth.zero)
-			a ~= `<D:depth>0</D:depth>`;
+			a ~= `<d:depth>0</d:depth>`;
 		else if(depth == DavDepth.infinity)
-			a ~= `<D:depth>infinity</D:depth>`;
+			a ~= `<d:depth>infinity</d:depth>`;
 
 		if(owner != "")
-			a ~= `<D:owner><D:href>`~owner~`</D:href></D:owner>`;
+			a ~= `<d:owner><d:href>`~owner~`</d:href></d:owner>`;
 
 		if(_timeout == SysTime.max)
-			a ~= `<D:timeout>Infinite</D:timeout>`;
+			a ~= `<d:timeout>Infinite</d:timeout>`;
 		else {
 			long seconds = (_timeout - Clock.currTime).total!"seconds";
-			a ~= `<D:timeout>Second-` ~ seconds.to!string ~ `</D:timeout>`;
+			a ~= `<d:timeout>Second-` ~ seconds.to!string ~ `</d:timeout>`;
 		}
 
-		a ~= `<D:locktoken><D:href>`~uuid~`</D:href></D:locktoken>`;
-		a ~= `<D:lockroot><D:href>`~rootURL~`</D:href></D:lockroot>`;
-
-		a ~= `</D:activelock></D:lockdiscovery></D:prop>`;
+		a ~= `<d:locktoken><d:href>`~uuid~`</d:href></d:locktoken>`;
+		a ~= `<d:lockroot><d:href>`~URL(rootURL).path.toNativeString~`</d:href></d:lockroot>`;
+		a ~= `</d:activelock>`;
 
 		return a;
 	}
@@ -127,13 +124,11 @@ class DavLockList {
 	}
 
 	bool hasEtag(string url, string etag) {
-		writeln("hasEtag ", url in etags ,"&&", etags[url].to!string ,"==", etag.to!string);
 		return url in etags && etags[url] == etag;
 	}
 
 	bool existLock(string url, string uuid) {
 		bool result;
-		writeln("LOCKS:", locks);
 		if(url !in locks || uuid !in locks[url])
 			result = false;
 		else
@@ -149,8 +144,6 @@ class DavLockList {
 		bool partialResult;
 		string strUrl = url.toString;
 
-		writeln(header);
-
 		if(header.isEmpty)
 			return true;
 
@@ -160,8 +153,6 @@ class DavLockList {
 
 			foreach(ifCondition; ifConditionList) {
 				bool conditionResult;
-
-				writeln("0.conditionResult:", conditionResult);
 
 				//check for conditions
 				bool result = existLock(conditionUrl, ifCondition.condition);
@@ -176,8 +167,6 @@ class DavLockList {
 						conditionResult = true;
 				}
 
-				writeln("4.conditionResult:", conditionResult);
-
 				//compute the partial result
 				partialResult = partialResult || conditionResult;
 			}
@@ -186,44 +175,11 @@ class DavLockList {
 		return partialResult;
 	}
 
-	bool isLocked(URL url, bool[string] headerLocks, ulong depth) {
-		string path = url.path.toString;
-		string strUrl = url.toString;
+	bool canResolve(string[] list, bool[string] headerLocks) {
 
-		writeln("1. isLocked ", url, " ", headerLocks);
-		//check if we have locks
-		if(strUrl !in locks && path == "/") {
-
-			writeln("2. isLocked");
-			return false; // we don't have any lock
-		}
-		else if(strUrl !in locks) {
-
-			writeln("3. isLocked");
-			return isLocked(url.parentURL, headerLocks, depth + 1);
-		} else {
-			if(locks[strUrl].keys.length == 0) {
-				writeln("4. isLocked");
-				return false; // we don't have any lock for the current url
-			}
-
-			foreach(string uuid, lock; locks[strUrl]) {
-				writeln("5. isLocked ", uuid ," in ", headerLocks ," && ", lock.depth ," < ", depth);
-				if(uuid in headerLocks && lock.depth <= depth) {
-					writeln("1.", url, " depth ", lock.depth ,"<=", depth);
-					return false;
-				}
-			}
-			writeln("6. isLocked ", locks);
-
-			foreach(string uuid, lock; locks[strUrl]) {
-				writeln("7. isLocked ", lock.depth ," < ", depth);
-				if(lock.depth < depth) {
-					writeln("8.", url, " depth ", lock.depth ,">=", depth);
-					return false;
-				}
-			}
-		}
+		foreach(i; 0..list.length)
+			if(list[i] !in headerLocks)
+				return false;
 
 		return true;
 	}
@@ -232,10 +188,33 @@ class DavLockList {
 		if(!checkCondition(url, header))
 			throw new DavException(HTTPStatus.preconditionFailed, "Precondition failes.");
 
-		if(isLocked(url, header.getLocks(url.toString), 0))
+
+		auto mustResolve = lockedParentResource(url);
+
+		writeln("locks: ", locks );
+		writeln("mustResolve ", mustResolve);
+		writeln("with ", header.getLocks(url.toString));
+
+		if(!canResolve(mustResolve, header.getLocks(url.toString)))
 			throw new DavException(HTTPStatus.locked, "Locked.");
 
 		return true;
+	}
+
+	string[] lockedParentResource(URL url, long depth = -1) {
+		string[] list;
+		string path = url.path.toString;
+		string strUrl = url.toString;
+
+		if(strUrl in locks)
+			foreach(uuid, lock; locks[strUrl])
+				if(depth <= lock.depth)
+					list ~= uuid;
+
+		if(path == "/")
+			return list;
+		else
+			return list ~ lockedParentResource(url.parentURL, depth + 1);
 	}
 
 	void add(DavLockInfo lockInfo) {
@@ -272,24 +251,25 @@ class DavLockList {
 		if(url !in locks)
 			return false;
 
-		foreach(string uuid, lock; locks[url]) {
-			if(lock.scopeLock == DavLockInfo.Scope.exclusiveLock){
-				writeln("EXCLUSIVE LOCK:", lock);
+		foreach(string uuid, lock; locks[url])
+			if(lock.scopeLock == DavLockInfo.Scope.exclusiveLock)
 				return true;
-			}
-		}
 
 		return false;
 	}
 
 	DavLockInfo opIndex(string path, string uuid) {
-		writeln("\n\n",path, ",", uuid);
-		writeln(locks);
-
 		if(path !in locks || uuid !in locks[path])
 			return null;
 
 		return locks[path][uuid];
+	}
+
+	DavLockInfo[string] opIndex(string path) {
+		if(path !in locks)
+			return null;
+
+		return locks[path];
 	}
 
 	void setETag(URL url, string etag) {

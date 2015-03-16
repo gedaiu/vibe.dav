@@ -6,7 +6,6 @@
  */
 module vibedav.base;
 
-public import vibedav.util;
 public import vibedav.prop;
 public import vibedav.ifheader;
 public import vibedav.locks;
@@ -78,7 +77,14 @@ unittest {
 }
 
 void enforce(string[] valid)(string value) {
+	bool isValid;
 
+	foreach(validValue; valid)
+		if(value == validValue)
+			isValid = true;
+
+	if(!isValid)
+		throw new DavException(HTTPStatus.internalServerError, "Invalid value.");
 }
 
 string getHeader(string name)(HeaderList headers) {
@@ -133,10 +139,9 @@ class DavResource {
 	string href; //TODO: Where I set this?
 	URL url;
 
-	DavProp properties; //TODO: Maybe I should move this to Dav class, or other storage
-
 	protected {
 		Dav dav;
+		DavProp properties; //TODO: Maybe I should move this to Dav class, or other storage
 	}
 
 	this(Dav dav, URL url) {
@@ -178,13 +183,73 @@ class DavResource {
 		}
 	}
 
+	DavProp property(string key) {
+
+		switch (key) {
+
+			default:
+				return properties[key];
+
+			// RFC4918
+		    case "getcontentlength:DAV:":
+		    	return new DavProp("DAV:", "getcontentlength", contentLength.to!string);
+
+		    case "getetag:DAV:":
+		    	return new DavProp("DAV:", "getetag", `"` ~ eTag ~ `"`);
+
+		    case "getlastmodified:DAV:":
+		  		return new DavProp("DAV:", "getlastmodified", toRFC822DateTimeString(lastModified));
+
+		    case "lockdiscovery:DAV:":
+		    	string strLocks;
+		    	bool[string] headerLocks;
+
+		    	if(dav.locks.lockedParentResource(url).length > 0) {
+		    		auto list = dav.locks[fullURL];
+		    		foreach(lock; list)
+		    			strLocks ~= lock.toString;
+		    	}
+
+		    	return new DavProp("DAV:", "lockdiscovery", strLocks);
+
+		    case "supportedlock:DAV":
+		    	return new DavProp("<d:supportedlock xmlns:d=\"DAV:\">
+							            <d:lockentry>
+							              <d:lockscope><d:exclusive/></d:lockscope>
+							              <d:locktype><d:write/></d:locktype>
+							            </d:lockentry>
+							            <d:lockentry>
+							              <d:lockscope><d:shared/></d:lockscope>
+							              <d:locktype><d:write/></d:locktype>
+							            </d:lockentry>
+							          </d:supportedlock>");
+
+
+        // RFC4331
+        /*'quota-available-bytes',
+        'quota-used-bytes',
+        // RFC3744
+        'supported-privilege-set',
+        'current-user-privilege-set',
+        'acl',
+        'acl-restrictions',
+        'inherited-acl-set',
+        // RFC3253
+        'supported-method-set',
+        'supported-report-set',
+        // RFC6578
+        'sync-token',*/
+    	}
+	}
+
 	void filterProps(DavProp parent, bool[string] props = cast(bool[string])[]) {
 		DavProp item = new DavProp;
 		item.parent = parent;
+		item.name = "d:response";
 
 		DavProp[][int] result;
 
-		item[`d:href`] = url.to!string;
+		item[`d:href`] = url.path.toNativeString;
 
 		foreach(key; props.keys) {
 			DavProp p;
@@ -193,7 +258,7 @@ class DavResource {
 			auto tagNameSpace = key[splitPos+1..$];
 
 			try {
-				p = properties[key];
+				p = property(key);
 				result[200] ~= p;
 			} catch (DavException e) {
 				p = new DavProp;
@@ -203,6 +268,7 @@ class DavResource {
 			}
 		}
 
+		/// Add the properties by status
 		foreach(code; result.keys) {
 			auto propStat = new DavProp;
 			propStat.parent = item;
@@ -217,7 +283,7 @@ class DavResource {
 			item.addChild(propStat);
 		}
 
-		item["d:status"] = `HTTP/1.1 200 ok`;
+		item["d:status"] = `HTTP/1.1 200 OK`;
 
 		parent.addChild(item);
 	}
@@ -307,6 +373,7 @@ class DavResource {
 		DavResource[] getChildren(ulong depth = 1);
 		HTTPStatus move(URL newPath, bool overwrite = false);
 		void setContent(const ubyte[] content);
+		void setContent(InputStream content, ulong size);
 
 		@property {
 			string eTag();
@@ -330,10 +397,10 @@ struct PropfindResponse {
 
 	string toStringProps(bool[string] props) {
 		string str = `<?xml version="1.0" encoding="UTF-8"?>`;
-		auto response = parseXMLProp(`<d:multistatus xmlns:d="DAV:"><d:response></d:response></d:multistatus>`);
+		auto response = parseXMLProp(`<d:multistatus xmlns:d="DAV:"></d:multistatus>`);
 
 		foreach(item; list) {
-			item.filterProps(response["d:multistatus"]["d:response"], props);
+			item.filterProps(response["d:multistatus"], props);
 		}
 
 		return str ~ response.toString;
@@ -374,7 +441,6 @@ struct DavResponse {
 	}
 
 	void flush() {
-		writeln("this.response.headers ", this.response.headers);
 		response.statusCode = statusCode;
 		response.writeBody(_content, response.headers["Content-Type"]);
 	}
@@ -414,7 +480,17 @@ struct DavRequest {
 		}
 
 		ulong contentLength() {
-			string value = getHeader!"Content-Length"(request.headers);
+
+			string value = "0";
+
+			if("Content-Length" in request.headers)
+				value = getHeader!"Content-Length"(request.headers);
+			else if("Transfer-Encoding" in request.headers && "X-Expected-Entity-Length" in request.headers) {
+				enforceBadRequest(request.headers["Transfer-Encoding"] == "chunked" ||
+								  request.headers["Transfer-Encoding"] == "Chunked");
+				value = getHeader!"X-Expected-Entity-Length"(request.headers);
+			}
+
 			return value.to!ulong;
 		}
 
@@ -433,6 +509,10 @@ struct DavRequest {
 
 		ubyte[] rawContent() {
 			return request.bodyReader.readAll;
+		}
+
+		InputStream stream() {
+			return request.bodyReader;
 		}
 
 		URL url() {
@@ -527,7 +607,7 @@ abstract class DavBase : IDav {
 			try {
 				resource = getResource(url);
 				status = HTTPStatus.ok;
-			} catch (DavException e){
+			} catch (DavException e) {
 				if(e.status != HTTPStatus.notFound)
 					throw e;
 
@@ -589,15 +669,14 @@ abstract class Dav : DavBase {
 		response.statusCode = HTTPStatus.multiStatus;
 		response.mimeType = "application/xml";
 
-
-		if(requestedProperties.length == 0) {
+		if(requestedProperties.length == 0)
 			response.content = pfResponse.toString;
-		} else {
+		else
 			response.content = pfResponse.toStringProps(requestedProperties);
-		}
 
 		response.flush;
 	}
+
 
 	void lock(DavRequest request, DavResponse response) {
 		auto ifHeader = request.ifCondition;
@@ -635,7 +714,7 @@ abstract class Dav : DavBase {
 
 		response["Lock-Token"] = "<" ~ currentLock.uuid ~ ">";
 		response.mimeType = "application/xml";
-		response.content = currentLock.toString;
+		response.content = `<?xml version="1.0" encoding="utf-8" ?><d:prop xmlns:d="DAV:"><d:lockdiscovery> ` ~ currentLock.toString ~ `</d:lockdiscovery></d:prop>`;
 		response.flush;
 	}
 
@@ -689,8 +768,7 @@ abstract class Dav : DavBase {
 
 		locks.check(request.url, request.ifCondition);
 
-		auto content = request.rawContent;
-		resource.setContent(content);
+		resource.setContent(request.stream, request.contentLength);
 
 		locks.setETag(resource.url, resource.eTag);
 
@@ -742,7 +820,6 @@ abstract class Dav : DavBase {
 			throw new DavException(HTTPStatus.conflict, "Missing parent");
 
 		auto resource = getResource(url);
-		locks.check(url.parentURL, ifHeader);
 		locks.check(url, ifHeader);
 
 		resource.remove();
@@ -753,7 +830,6 @@ abstract class Dav : DavBase {
 		auto ifHeader = request.ifCondition;
 		auto resource = getResource(request.url);
 
-		locks.check(request.url.parentURL, ifHeader);
 		locks.check(request.url, ifHeader);
 		locks.check(request.destination, ifHeader);
 
@@ -764,7 +840,6 @@ abstract class Dav : DavBase {
 	void copy(DavRequest request, DavResponse response) {
 		auto resource = getResource(request.url);
 
-		locks.check(request.destination.parentURL, request.ifCondition);
 		locks.check(request.destination, request.ifCondition);
 
 		response.statusCode = resource.copy(request.destination, request.overwrite);
@@ -782,14 +857,13 @@ HTTPServerRequestDelegate serveDav(T : Dav)(Path path) {
 
 			debug {
 				writeln("\n\n\n");
+
+				writeln("==========================================================");
 				writeln(req.fullURL);
-
-				if("X-Litmus" in req.headers) {
-					writeln(req.headers["X-Litmus"]);
-				}
-
 				writeln("Method: ", req.method);
-				writeln("==========================");
+
+				foreach(key, val; req.headers)
+					writeln(key, ": ", val);
 			}
 
 			DavRequest request = DavRequest(req);
@@ -830,7 +904,9 @@ HTTPServerRequestDelegate serveDav(T : Dav)(Path path) {
 			res.writeBody(e.msg, e.mime);
 		}
 
-		writeln("SUCCESS:", res.statusCode.to!int, "(", res.statusCode, ")");
+		debug {
+			writeln("SUCCESS:", res.statusCode.to!int, "(", res.statusCode, ")");
+		}
 	}
 
 	return &callback;

@@ -3,13 +3,9 @@ docs.json
 __dummy.html
 *.o
 *.obj
-
 *.a
-
 dub.selections.json
-
 __test__library__
-
 vibe-dav
-
 vibe-dav.sublime-project
+results.json

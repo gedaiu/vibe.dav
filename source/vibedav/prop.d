@@ -59,9 +59,10 @@ class DavProp {
 	string value;
 	string namespaceAttr = _NULL_NS;
 
-	this(string value, string namespaceAttr) {
+	this(string namespaceAttr, string name, string value) {
 		this(value);
 		this.namespaceAttr = namespaceAttr;
+		this.name = name;
 	}
 
 	this(string value) {
@@ -96,6 +97,14 @@ class DavProp {
 		}
 
 		string getTagText() {
+			if(namespaceAttr != _NULL_NS && prefix == "") {
+				auto p = getPrefixForNamespace(namespaceAttr);
+				if(p != "") {
+					name = p ~ ":" ~ name;
+					namespaceAttr = _NULL_NS;
+				}
+			}
+
 			return name ~ getNamespaceAttributes;
 		}
 	}
@@ -151,6 +160,18 @@ class DavProp {
 			return parent.getNamespaceForPrefix(prefix);
 
 		throw new DavPropException(HTTPStatus.internalServerError, `Undefined '` ~ prefix ~ `' namespace.`);
+	}
+
+	string getPrefixForNamespace(string namespace) inout {
+
+		foreach(string prefix, string ns; namespaces)
+			if(namespace == ns)
+				return prefix;
+
+		if(parent !is null)
+			return parent.getPrefixForNamespace(namespace);
+
+		return "";
 	}
 
 	bool isNameSpaceDefined(string prefix) {
@@ -833,4 +854,10 @@ unittest {
 unittest {
 	auto prop = parseXMLProp(`<test xmlns="DAV:"><nonamespace xmlns="">randomvalue</nonamespace></test>`);
 	assert(prop.toString == `<test xmlns="DAV:"><nonamespace xmlns="">randomvalue</nonamespace></test>`);
+}
+
+@name("replace namespaces with prefixes")
+unittest {
+	auto prop = parseXMLProp(`<a xmlns:D="DAV:"><b xmlns="DAV:">randomvalue</b></a>`);
+	assert(prop.toString == `<a xmlns:D="DAV:"><D:b>randomvalue</D:b></a>`);
 }

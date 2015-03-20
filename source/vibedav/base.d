@@ -137,6 +137,7 @@ enum DavDepth : int {
 /// Represents a general DAV resource
 class DavResource {
 	string href; //TODO: Where I set this?
+	string username;
 	URL url;
 
 	protected {
@@ -223,22 +224,6 @@ class DavResource {
 							              <d:locktype><d:write/></d:locktype>
 							            </d:lockentry>
 							          </d:supportedlock>");
-
-
-        // RFC4331
-        /*'quota-available-bytes',
-        'quota-used-bytes',
-        // RFC3744
-        'supported-privilege-set',
-        'current-user-privilege-set',
-        'acl',
-        'acl-restrictions',
-        'inherited-acl-set',
-        // RFC3253
-        'supported-method-set',
-        'supported-report-set',
-        // RFC6578
-        'sync-token',*/
     	}
 	}
 
@@ -368,7 +353,6 @@ class DavResource {
 		return HTTPStatus.ok;
 	}
 
-
 	abstract {
 		DavResource[] getChildren(ulong depth = 1);
 		HTTPStatus move(URL newPath, bool overwrite = false);
@@ -432,7 +416,7 @@ struct DavResponse {
 		this.response.headers["Content-Type"] = "text/plain";
 	}
 
-	void opIndexAssign(T)(T value, T key) {
+	void opIndexAssign(T)(string value, T key) {
 		static if(is( T == string )) {
 			response.headers[key] = value;
 		} else {
@@ -440,8 +424,33 @@ struct DavResponse {
 		}
 	}
 
+	string opIndex(string key) {
+		return response.headers[key];
+	}
+
+	static DavResponse Create() {
+		import vibe.stream.stdio;
+		import vibe.utils.memory;
+
+		StdFileStream conn = new StdFileStream(false, true);
+		ConnectionStream raw_connection = new StdFileStream(false, true);
+		HTTPServerSettings settings = new HTTPServerSettings;
+		Allocator req_alloc = defaultAllocator();
+
+		HTTPServerResponse response = new HTTPServerResponse(conn, raw_connection, settings, req_alloc);
+		return DavResponse(response);
+	}
+
+	@name("Test opIndex")
+	unittest {
+		DavResponse davResponse = DavResponse.Create;
+		davResponse["test"] = "value";
+		assert(davResponse["test"] == "value");
+	}
+
 	void flush() {
 		response.statusCode = statusCode;
+		writeln("\n", _content);
 		response.writeBody(_content, response.headers["Content-Type"]);
 	}
 
@@ -498,6 +507,8 @@ struct DavRequest {
 			DavProp document;
 			string requestXml = cast(string)request.bodyReader.readAllUTF8;
 
+			writeln("requestXml:", requestXml);
+
 			if(requestXml.length > 0) {
 				try document = requestXml.parseXMLProp;
 				catch (DavPropException e)
@@ -553,6 +564,16 @@ struct DavRequest {
 		bool overwrite() {
 			return getHeader!"Overwrite"(request.headers) == "T";
 		}
+
+		static DavRequest Create() {
+			HTTPServerRequest req = new HTTPServerRequest(Clock.currTime, 0);
+
+			return DavRequest(req);
+		}
+
+		string username() {
+			return request.username;
+		}
 	}
 
 	bool ifModifiedSince(DavResource resource) {
@@ -592,7 +613,8 @@ interface IDav {
 }
 
 abstract class DavBase : IDav {
-	Path root;
+	Path urlRoot;
+
 	DavProp[string] resourcePropStorage;
 	DavLockList locks;
 
@@ -643,7 +665,6 @@ abstract class Dav : DavBase {
 		}
 	}
 
-
 	void options(DavRequest request, DavResponse response) {
 		string path = request.path;
 
@@ -659,6 +680,7 @@ abstract class Dav : DavBase {
 		bool[string] requestedProperties = propList(request.content);
 
 		auto selectedResource = getResource(request.url);
+		selectedResource.username = request.username;
 
 		auto pfResponse = new PropfindResponse();
 		pfResponse.list ~= selectedResource;
@@ -796,12 +818,19 @@ abstract class Dav : DavBase {
 		if(request.contentLength > 0)
 			throw new DavException(HTTPStatus.unsupportedMediaType, "Body must be empty");
 
+		writeln("mkcol 1");
 		try {
+			writeln("mkcol 2");
 			auto resource = getResource(request.url.parentURL);
+			writeln("mkcol 3");
 		} catch (DavException e) {
+			writeln("mkcol 4 ", e);
 			if(e.status == HTTPStatus.notFound)
 				throw new DavException(HTTPStatus.conflict, "Missing parent");
+
+			writeln("mkcol 5");
 		}
+		writeln("mkcol 6");
 
 		locks.check(request.url, ifHeader);
 
@@ -847,10 +876,7 @@ abstract class Dav : DavBase {
 	}
 }
 
-HTTPServerRequestDelegate serveDav(T : Dav)(Path path) {
-	auto dav = new T;
-	dav.root = path;
-
+HTTPServerRequestDelegate serveDav(T : Dav)(T dav) {
 	void callback(HTTPServerRequest req, HTTPServerResponse res)
 	{
 		try {

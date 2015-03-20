@@ -4,7 +4,7 @@
  * License: Subject to the	 terms of the MIT license, as written in the included LICENSE.txt file.
  * Copyright: Public Domain
  */
-module vibedav.file;
+module vibedav.filedav;
 
 public import vibedav.base;
 
@@ -22,7 +22,6 @@ import vibe.stream.memory;
 import vibe.utils.memory;
 
 import std.conv : to;
-import std.algorithm;
 import std.file;
 import std.path;
 import std.digest.md;
@@ -37,9 +36,11 @@ import tested: testName = name;
 
 /// File dav impplementation
 class FileDav : Dav {
+	Path root;
+
 	@property
 	Path filePath(URL url) {
-		return root ~ url.path.toString[1..$];
+		return root ~ url.path.toString[urlRoot.toString.length..$];
 	}
 
 	override DavResource getResource(URL url) {
@@ -48,7 +49,7 @@ class FileDav : Dav {
 		if(!filePath.toString.exists)
 			throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
 
-		return new DavFileResource(this, root, url);
+		return new DavFileResource(this, url);
 	}
 
 	override DavResource createCollection(URL url) {
@@ -59,7 +60,7 @@ class FileDav : Dav {
 
 		mkdir(filePath.toString);
 
-		return new DavFileResource(this, root, url);
+		return new DavFileResource(this, url);
 	}
 
 	override DavResource createProperty(URL url) {
@@ -71,34 +72,38 @@ class FileDav : Dav {
 		auto f = new File(filePath.toString, "w");
 		f.close;
 
-		return new DavFileResource(this, root, url);
+		return new DavFileResource(this, url);
 	}
 }
 
 /// Represents a file or directory DAV resource
-final class DavFileResource : DavResource {
+class DavFileResource : DavResource {
 
 	private immutable {
 		Path resPath;
-		Path fileRoot;
 		Path filePath;
 	}
 
-	this(Dav dav, Path root, URL url) {
+	protected {
+		FileDav dav;
+	}
+
+	this(FileDav dav, URL url) {
 		super(dav, url);
 
+		this.dav = dav;
 		auto path = url.path;
 
 		path.normalize;
-		root.normalize;
 
-		logTrace("create DAV file resource %s %s", root , path);
+		logTrace("create DAV file resource %s %s", dav.root , path);
 
 		resPath = path;
-		fileRoot = root;
-		filePath = root ~ path.toString[1..$];
+		filePath = dav.root ~ path.toString[dav.urlRoot.toString.length..$];
 
 		auto pathstr = filePath.toNativeString();
+
+		writeln("=> pathstr ", pathstr);
 
 		if(!pathstr.exists)
 			throw new DavException(HTTPStatus.notFound, "File not found.");
@@ -167,7 +172,7 @@ final class DavFileResource : DavResource {
 
 		if(depth == 0) return list;
 		string listPath = filePath.toString.decode;
-		string rootPath = fileRoot.toString.decode;
+		string rootPath = dav.root.toString.decode;
 
 		auto fileList = dirEntries(listPath, "*", SpanMode.shallow);
 
@@ -177,7 +182,7 @@ final class DavFileResource : DavResource {
 			URL childUrl = url;
 			childUrl.path = childUrl.path ~ fileName;
 
-	   		auto resource = new DavFileResource(this.dav, fileRoot, childUrl);
+	   		auto resource = new DavFileResource(this.dav, childUrl);
 
 	   		list ~= resource;
 
@@ -219,7 +224,7 @@ final class DavFileResource : DavResource {
 
 	override HTTPStatus move(URL destinationUrl, bool overwrite = false) {
 		Path urlPath = destinationUrl.pathString;
-		Path destinationPath = fileRoot ~ urlPath.toString.decode[1..$];
+		Path destinationPath = dav.root ~ urlPath.toString.decode[1..$];
 
 		auto parentResource = dav.getResource(url.parentURL);
 
@@ -238,7 +243,7 @@ final class DavFileResource : DavResource {
 	override HTTPStatus copy(URL destinationURL, bool overwrite = false) {
 		HTTPStatus retCode = HTTPStatus.created;
 
-		auto destinationPathObj = (fileRoot ~ destinationURL.path.toString[1..$]);
+		auto destinationPathObj = (dav.root ~ destinationURL.path.toString[dav.urlRoot.toString.length..$]);
 		destinationPathObj.endsWithSlash = false;
 
 		string destinationPath = destinationPathObj.toString.decode;
@@ -336,6 +341,11 @@ final class DavFileResource : DavResource {
 	}
 }
 
-HTTPServerRequestDelegate serveFileDav(Path path) {
-	return serveDav!FileDav(path);
+void serveFileDav(URLRouter router, Path urlPath, Path path) {
+
+	FileDav fileDav = new FileDav;
+	fileDav.root = path;
+	fileDav.urlRoot = urlPath;
+
+	router.any((urlPath ~ "*").toString, serveDav(fileDav));
 }

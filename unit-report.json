@@ -1,0 +1,8 @@
+{
+	"port": 8008,
+	"bindAddress": "127.0.0.1",
+	"report": "results.json",
+	"testCommand": "dub",
+	"testParam": "test",
+	"workingPath": ".",
+}

@@ -30,6 +30,8 @@ import std.typecons;
 import std.uri;
 import std.uuid;
 
+import core.thread;
+
 import tested;
 
 

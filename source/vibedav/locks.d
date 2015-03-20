@@ -13,7 +13,6 @@ import std.datetime;
 import std.uuid;
 import std.string;
 
-
 import vibe.core.log;
 import vibe.core.file;
 import vibe.inet.mimetypes;

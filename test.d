@@ -1,15 +1,14 @@
 import std.typetuple;
 
 import vibedav.base;
-import vibedav.file;
+import vibedav.filedav;
+import vibedav.caldav;
 import vibedav.prop;
 import vibedav.ifheader;
 import vibedav.parser;
-alias allModules = TypeTuple!(vibedav.base,
-							  vibedav.file,
-							  vibedav.prop,
-							  vibedav.ifheader,
-							  vibedav.parser);
+import vibedav.icalendar;
+
+import dub_test_root;
 
 import std.stdio;
 import core.runtime;
@@ -35,8 +34,8 @@ shared static this() {
 
 		//runUnitTests!app(new JsonTestResultWriter("results.json"));
 
-		//enforce(runUnitTests!allModules(new ConsoleTestResultWriter), "Unit tests failed.");
-		result = runUnitTests!allModules(new JsonTestResultWriter("results.json"));
+		//result = runUnitTests!allModules(new ConsoleTestResultWriter);
+		result = runUnitTests!allModules(new JsonDetailTestResultWriter("results.json"));
 	}
 }
 

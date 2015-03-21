@@ -6,21 +6,8 @@
 	"license": "MIT",
 	"dependencies": {
 		"vibe-d": "~>0.7.22",
-		"tested": {
-			"version": ">=0.9.2",
-			"path": "../tested"
-		}
+		"tested": "~>0.9.2"
 	},
 
-	"targetType": "library",
-
-	"configurations": [
-		{
-			"name": "tested",
-			"mainSourceFile": "source/test.d",
-			"versions": ["VibeCustomMain"],
-			"dflags": ["-unittest"],
-			"targetType": "executable"
-		}
-	]
+	"targetType": "library"
 }

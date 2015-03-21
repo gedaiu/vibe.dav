@@ -36,11 +36,21 @@ import tested: testName = name;
 
 /// File dav impplementation
 class FileDav : Dav {
-	Path root;
+	protected {
+		Path rootFile;
+	}
 
-	@property
+	this() {
+		this("","");
+	}
+
+	this(string rootUrl, string rootFile) {
+		super(rootUrl);
+		this.rootFile = Path(rootFile);
+	}
+
 	Path filePath(URL url) {
-		return root ~ url.path.toString[urlRoot.toString.length..$];
+		return rootFile ~ url.path.toString[rootUrl.toString.length..$];
 	}
 
 	override DavResource getResource(URL url) {
@@ -96,14 +106,12 @@ class DavFileResource : DavResource {
 
 		path.normalize;
 
-		logTrace("create DAV file resource %s %s", dav.root , path);
+		logTrace("create DAV file resource %s %s", dav.rootFile , path);
 
 		resPath = path;
-		filePath = dav.root ~ path.toString[dav.urlRoot.toString.length..$];
+		filePath = dav.filePath(url);
 
 		auto pathstr = filePath.toNativeString();
-
-		writeln("=> pathstr ", pathstr);
 
 		if(!pathstr.exists)
 			throw new DavException(HTTPStatus.notFound, "File not found.");
@@ -172,7 +180,7 @@ class DavFileResource : DavResource {
 
 		if(depth == 0) return list;
 		string listPath = filePath.toString.decode;
-		string rootPath = dav.root.toString.decode;
+		string rootPath = dav.rootFile.toString.decode;
 
 		auto fileList = dirEntries(listPath, "*", SpanMode.shallow);
 
@@ -214,7 +222,6 @@ class DavFileResource : DavResource {
 		std.file.write("level1/level2/testFile2.txt", "hello!");
 
 		auto dav = new FileDav;
-		dav.root = Path("");
 
 		auto file = dav.getResource(URL("http://127.0.0.1/level1"));
 		file.remove;
@@ -223,15 +230,14 @@ class DavFileResource : DavResource {
 	}
 
 	override HTTPStatus move(URL destinationUrl, bool overwrite = false) {
-		Path urlPath = destinationUrl.pathString;
-		Path destinationPath = dav.root ~ urlPath.toString.decode[1..$];
+		Path destinationPath = dav.filePath(destinationUrl);
 
 		auto parentResource = dav.getResource(url.parentURL);
 
 		if(destinationPath == filePath)
 			throw new DavException(HTTPStatus.forbidden, "Destination same as source.");
 
-		if(!overwrite && parentResource.hasChild(urlPath))
+		if(!overwrite && parentResource.hasChild(destinationUrl.path))
 			throw new DavException(HTTPStatus.preconditionFailed, "Destination already exists.");
 
 		auto retStatus = copy(destinationUrl, overwrite);
@@ -243,7 +249,7 @@ class DavFileResource : DavResource {
 	override HTTPStatus copy(URL destinationURL, bool overwrite = false) {
 		HTTPStatus retCode = HTTPStatus.created;
 
-		auto destinationPathObj = (dav.root ~ destinationURL.path.toString[dav.urlRoot.toString.length..$]);
+		auto destinationPathObj = dav.filePath(destinationURL);
 		destinationPathObj.endsWithSlash = false;
 
 		string destinationPath = destinationPathObj.toString.decode;
@@ -285,8 +291,7 @@ class DavFileResource : DavResource {
 	unittest {
 		std.file.write("testFile.txt", "hello!");
 
-		auto dav = new FileDav();
-		dav.root = Path("");
+		auto dav = new FileDav;
 
 		auto file = dav.getResource(URL("http://127.0.0.1/testFile.txt"));
 		if("testCopy.txt".exists) std.file.remove("testCopy.txt");
@@ -303,8 +308,7 @@ class DavFileResource : DavResource {
 		"level1/level2".mkdirRecurse;
 		std.file.write("level1/level2/testFile.txt", "hello!");
 
-		auto dav = new FileDav();
-		dav.root = Path("");
+		auto dav = new FileDav;
 
 		auto file = dav.getResource(URL("http://127.0.0.1/level1"));
 		file.copy(URL("http://127.0.0.1/_test"));
@@ -341,11 +345,7 @@ class DavFileResource : DavResource {
 	}
 }
 
-void serveFileDav(URLRouter router, Path urlPath, Path path) {
-
-	FileDav fileDav = new FileDav;
-	fileDav.root = path;
-	fileDav.urlRoot = urlPath;
-
-	router.any((urlPath ~ "*").toString, serveDav(fileDav));
+void serveFileDav(URLRouter router, string rootUrl, string rootPath) {
+	FileDav fileDav = new FileDav(rootUrl, rootPath);
+	router.any(rootUrl ~ "*", serveDav(fileDav));
 }

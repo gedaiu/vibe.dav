@@ -27,7 +27,18 @@ import tested;
 
 /// File dav impplementation
 class CalDav : Dav {
-	Path root;
+	protected {
+		Path rootFile;
+	}
+
+	this() {
+		this("", "");
+	}
+
+	this(string rootUrl, string rootFile) {
+		super(rootUrl);
+		this.rootFile = Path(rootFile);
+	}
 
 	override DavResource getResource(URL url) {
 
@@ -49,13 +60,17 @@ class CalDav : Dav {
 		string path = request.path;
 
 		response["DAV"] = response["DAV"] ~ ",calendar-access";
-		response["Allow"] = response["Allow"] ~ "REPORT,ACL";
+		response["Allow"] = response["Allow"] ~ ",REPORT,ACL";
 
 		response.flush;
 	}
 }
 
-class CalDavPath : CalDav {
+class CalDavFile : CalDav {
+
+	this(string rootUrl, string rootFile) {
+		super(rootUrl, rootFile);
+	}
 
 	override DavResource getResource(URL url) {
 
@@ -71,32 +86,10 @@ class CalDavPath : CalDav {
 
 		return new DavCalendarResource(this, url);
 	}
-
 }
-
-@name("Check the response for the OPTIONS request")
-unittest {
-	CalDav calDav = new CalDav;
-	DavRequest request = DavRequest.Create;
-	DavResponse response = DavResponse.Create;
-
-	calDav.options(request, response);
-	auto davVal = response["DAV"];
-	auto allowVal = response["Allow"];
-
-	assert(davVal.indexOf("calendar-access") != -1);
-
-	assert(allowVal.indexOf("ACL") != -1);
-	assert(allowVal.indexOf("REPORT") != -1);
-}
-
-
-
-
-
 
 class DavCalendarBaseResource : DavResource {
-	CalDav dav;
+	protected CalDav dav;
 
 	this(CalDav dav, URL url) {
 		super(dav, url);
@@ -104,24 +97,19 @@ class DavCalendarBaseResource : DavResource {
 	}
 
 	override {
-
 		DavProp property(string key) {
-
-			writeln("key:", key);
-
 			switch(key) {
 				default:
 					return super.property(key);
 				case "calendar-home-set:urn:ietf:params:xml:ns:caldav":
 					return new DavProp( "urn:ietf:params:xml:ns:caldav", "calendar-home-set", homeSet);
-
 			}
 		}
 	}
 
 	@property {
 		string homeSet() {
-				return (dav.root ~ username).to!string;
+			return (dav.rootUrl ~ username).to!string;
 		}
 	}
 }
@@ -183,11 +171,8 @@ class DavCalendarResource : DavCalendarBaseResource {
 }
 
 /// Create a cal dav server that serves the files on hdd
-void serveCalDavPath(URLRouter router, Path urlRoot, Path path) {
-	CalDavPath calDav = new CalDavPath;
-	calDav.root = path;
-	calDav.urlRoot = urlRoot;
-
-	router.any((urlRoot ~ "*").toString, serveDav(calDav));
+void serveCalDavFile(URLRouter router, string rootUrl, string rootPath) {
+	CalDavFile calDav = new CalDavFile(rootUrl, rootPath);
+	router.any(rootUrl ~ "*", serveDav(calDav));
 }
 

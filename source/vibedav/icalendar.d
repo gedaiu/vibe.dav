@@ -150,8 +150,6 @@ unittest {
 
 	event["ATTACH"] = "value1";
 	event["ATTACH"] = "value2";
-
-	std.stdio.writeln(event.toString);
 	assert(event.toString == "BEGIN:VEVENT\nATTACH:value1\nATTACH:value2\nEND:VEVENT");
 }
 

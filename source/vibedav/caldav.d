@@ -1,7 +1,7 @@
 /**
  * Authors: Szabo Bogdan <szabobogdan@yahoo.com>
  * Date: 2 25, 2015
- * License: Subject to the	 terms of the MIT license, as written in the included LICENSE.txt file.
+ * License: Subject to the terms of the MIT license, as written in the included LICENSE.txt file.
  * Copyright: Public Domain
  */
 module vibedav.caldav;
@@ -25,97 +25,18 @@ import std.uuid;
 
 import tested;
 
-/// File dav impplementation
-class CalDav : Dav {
-	protected {
-		Path rootFile;
-	}
-
-	this() {
-		this("", "");
-	}
-
-	this(string rootUrl, string rootFile) {
-		super(rootUrl);
-		this.rootFile = Path(rootFile);
-	}
-
-	override DavResource getResource(URL url) {
-
-		return new DavCalendarResource(this, url);
-	}
-
-	override DavResource createCollection(URL url) {
-
-		return new DavCalendarResource(this, url);
-	}
-
-	override DavResource createProperty(URL url) {
-
-		return new DavCalendarResource(this, url);
-	}
-
-	override void options(DavRequest request, DavResponse response) {
-		super.options(request, response);
-		string path = request.path;
-
-		response["DAV"] = response["DAV"] ~ ",calendar-access";
-		response["Allow"] = response["Allow"] ~ ",REPORT,ACL";
-
-		response.flush;
-	}
-}
-
-class CalDavFile : CalDav {
-
-	this(string rootUrl, string rootFile) {
-		super(rootUrl, rootFile);
-	}
-
-	override DavResource getResource(URL url) {
-
-		return new DavCalendarResource(this, url);
-	}
-
-	override DavResource createCollection(URL url) {
-
-		return new DavCalendarResource(this, url);
-	}
-
-	override DavResource createProperty(URL url) {
-
-		return new DavCalendarResource(this, url);
-	}
-}
-
 class DavCalendarBaseResource : DavResource {
-	protected CalDav dav;
+	protected IDav dav;
 
-	this(CalDav dav, URL url) {
+	this(IDav dav, URL url) {
 		super(dav, url);
 		this.dav = dav;
-	}
-
-	override {
-		DavProp property(string key) {
-			switch(key) {
-				default:
-					return super.property(key);
-				case "calendar-home-set:urn:ietf:params:xml:ns:caldav":
-					return new DavProp( "urn:ietf:params:xml:ns:caldav", "calendar-home-set", homeSet);
-			}
-		}
-	}
-
-	@property {
-		string homeSet() {
-			return (dav.rootUrl ~ username).to!string;
-		}
 	}
 }
 
 /// Represents a file or directory DAV resource. NS=urn:ietf:params:xml:ns:caldav
-class DavCalendarResource : DavCalendarBaseResource {
+class DavFileCalendarResource : DavCalendarBaseResource {
+	alias DavFsType = DavFs!DavFileCalendarResource;
 
 	string description; //CALDAV:calendar-description
 	TimeZone timezone;  //CALDAV:calendar-timezone
@@ -127,16 +48,15 @@ class DavCalendarResource : DavCalendarBaseResource {
     ulong maxInstances; //CALDAV:max-instances
    	ulong maxAttendeesPerInstance; //CALDAV:max-attendees-per-instance
 
-	this(CalDav dav, URL url) {
+	protected immutable Path filePath;
+
+	this(DavFsType dav, URL url) {
 		super(dav, url);
+		filePath = dav.filePath(url);
 	}
 
 	override DavResource[] getChildren(ulong depth = 1) {
 		throw new DavException(HTTPStatus.notImplemented, "Can not .");
-	}
-
-	override HTTPStatus move(URL newPath, bool overwrite = false) {
-		throw new DavException(HTTPStatus.notImplemented, "not notImplemented");
 	}
 
 	override void setContent(const ubyte[] content) {
@@ -169,10 +89,3 @@ class DavCalendarResource : DavCalendarBaseResource {
 		}
 	}
 }
-
-/// Create a cal dav server that serves the files on hdd
-void serveCalDavFile(URLRouter router, string rootUrl, string rootPath) {
-	CalDavFile calDav = new CalDavFile(rootUrl, rootPath);
-	router.any(rootUrl ~ "*", serveDav(calDav));
-}
-

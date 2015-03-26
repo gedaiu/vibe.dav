@@ -34,7 +34,6 @@ struct IfCondition {
 		}
 
 		void etagConditionCallback(string value) {
-			writeln("");
 			etag = value[2..$-2];
 		}
 
@@ -63,7 +62,7 @@ struct IfCondition {
 
 struct IfHeader {
 
-	IfCondition list[string][];
+	IfCondition[][string] list;
 
 	@property {
 		bool isEmpty() {

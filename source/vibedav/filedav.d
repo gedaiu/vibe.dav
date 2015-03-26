@@ -34,71 +34,57 @@ import std.uuid;
 
 import tested: testName = name;
 
-/// File dav impplementation
-class FileDav : Dav {
-	protected {
-		Path rootFile;
+/// Compute a file etag
+string eTag(string path) {
+	import std.digest.crc;
+	import std.stdio;
+
+	string fileHash = path;
+
+	if(!path.isDir) {
+		auto f = File(path, "r");
+		foreach (ubyte[] buffer; f.byChunk(4096)) {
+			ubyte[4] hash = crc32Of(buffer);
+			fileHash ~= crcHexString(hash);
+	    }
 	}
 
-	this() {
-		this("","");
-	}
+	fileHash ~= path.lastModified.toISOExtString ~ path.contentLength.to!string;
 
-	this(string rootUrl, string rootFile) {
-		super(rootUrl);
-		this.rootFile = Path(rootFile);
-	}
+	auto etag = hexDigest!MD5(path ~ fileHash);
+	return etag.to!string;
+}
 
-	Path filePath(URL url) {
-		return rootFile ~ url.path.toString[rootUrl.toString.length..$];
-	}
+SysTime lastModified(string path) {
+	FileInfo dirent = getFileInfo(path);
+	return dirent.timeModified.toUTC;
+}
 
-	override DavResource getResource(URL url) {
-		auto filePath = filePath(url);
+SysTime creationDate(string path) {
+	FileInfo dirent = getFileInfo(path);
+	return dirent.timeCreated.toUTC;
+}
 
-		if(!filePath.toString.exists)
-			throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
+ulong contentLength(string path) {
+	FileInfo dirent = getFileInfo(path);
+	return dirent.size;
+}
 
-		return new DavFileResource(this, url);
-	}
-
-	override DavResource createCollection(URL url) {
-		auto filePath = filePath(url);
-
-		if(filePath.toString.exists)
-			throw new DavException(HTTPStatus.methodNotAllowed, "plain/text");
-
-		mkdir(filePath.toString);
-
-		return new DavFileResource(this, url);
-	}
-
-	override DavResource createProperty(URL url) {
-		auto filePath = filePath(url);
-
-		if(filePath.toString.exists)
-			throw new DavException(HTTPStatus.methodNotAllowed, "plain/text");
-
-		auto f = new File(filePath.toString, "w");
-		f.close;
-
-		return new DavFileResource(this, url);
-	}
+FileStream toStream(string path) {
+	return openFile(path);
 }
 
 /// Represents a file or directory DAV resource
 class DavFileResource : DavResource {
-
-	private immutable {
-		Path resPath;
-		Path filePath;
-	}
+	alias DavFsType = DavFs!DavFileResource;
 
 	protected {
-		FileDav dav;
+		immutable Path filePath;
+		immutable string nativePath;
+		DavFsType dav;
 	}
 
-	this(FileDav dav, URL url) {
+	this(DavFsType dav, URL url) {
 		super(dav, url);
 
 		this.dav = dav;
@@ -106,72 +92,41 @@ class DavFileResource : DavResource {
 
 		path.normalize;
 
-		logTrace("create DAV file resource %s %s", dav.rootFile , path);
-
-		resPath = path;
 		filePath = dav.filePath(url);
+		nativePath = filePath.toNativeString();
 
-		auto pathstr = filePath.toNativeString();
-
-		if(!pathstr.exists)
+		if(!nativePath.exists)
 			throw new DavException(HTTPStatus.notFound, "File not found.");
 
-		FileInfo dirent = getFileInfo(pathstr);
+		properties["d:creationdate"] = new DavProp(nativePath.creationDate.toRFC822DateTimeString);
 
-		auto creationDate = toRFC822DateTimeString(dirent.timeCreated.toUTC());
-		isCollection = pathstr.isDir;
-
-		string resType = "";
-		properties["d:creationdate"] = new DavProp(creationDate);
-
-		if(!pathstr.isDir) {
-			properties["d:getcontenttype"] = new DavProp(getMimeTypeForFile(pathstr));
-		}
+		if(nativePath.isDir)
+			isCollection = true;
+		else
+			properties["d:getcontenttype"] = new DavProp(getMimeTypeForFile(nativePath));
 
 		href = path.toString;
 	}
 
 	@property override {
 		string eTag() {
-			import std.digest.crc;
-			import std.stdio;
-
-			auto pathstr = filePath.toNativeString();
-			string fileHash = pathstr;
-
-			if(!pathstr.isDir) {
-				auto f = File(pathstr, "r");
-				foreach (ubyte[] buffer; f.byChunk(4096)) {
-					ubyte[4] hash = crc32Of(buffer);
-					fileHash ~= crcHexString(hash);
-			    }
-			}
-
-			fileHash ~= lastModified.toISOExtString ~ contentLength.to!string;
-
-			auto etag = hexDigest!MD5(pathstr ~ fileHash);
-			return etag.to!string;
+			return nativePath.eTag;
 		}
 
 		string mimeType() {
-			return getMimeTypeForFile(filePath.toString);
+			return getMimeTypeForFile(nativePath);
 		}
 
 		SysTime lastModified() {
-			FileInfo dirent = getFileInfo(filePath.toNativeString);
-			return dirent.timeModified.toUTC;
+			return nativePath.lastModified;
 		}
 
 		ulong contentLength() {
-			FileInfo dirent = getFileInfo(filePath.toNativeString);
-			return dirent.size;
+			return nativePath.contentLength;
 		}
 
 		InputStream stream() {
-			FileStream fil;
-			fil = openFile(filePath.toString);
-
-			return fil;
+			return nativePath.toStream;
 		}
 	}
 
@@ -218,105 +173,12 @@ class DavFileResource : DavResource {
 	@testName("exists")
 	unittest {
 		"level1/level2".mkdirRecurse;
-		std.file.write("level1/level2/testFile1.txt", "hello!");
-		std.file.write("level1/level2/testFile2.txt", "hello!");
 
-		auto dav = new FileDav;
-
-		auto file = dav.getResource(URL("http://127.0.0.1/level1"));
+		auto dav = new DavFs!DavFileResource( "/", "./" );
+		auto file = dav.getResource(URL("http://127.0.0.1/level1/"));
 		file.remove;
 
 		assert(!"level1".exists);
-	}
-
-	override HTTPStatus move(URL destinationUrl, bool overwrite = false) {
-		Path destinationPath = dav.filePath(destinationUrl);
-
-		auto parentResource = dav.getResource(url.parentURL);
-
-		if(destinationPath == filePath)
-			throw new DavException(HTTPStatus.forbidden, "Destination same as source.");
-
-		if(!overwrite && parentResource.hasChild(destinationUrl.path))
-			throw new DavException(HTTPStatus.preconditionFailed, "Destination already exists.");
-
-		auto retStatus = copy(destinationUrl, overwrite);
-		remove;
-
-		return retStatus;
-	}
-
-	override HTTPStatus copy(URL destinationURL, bool overwrite = false) {
-		HTTPStatus retCode = HTTPStatus.created;
-
-		auto destinationPathObj = dav.filePath(destinationURL);
-		destinationPathObj.endsWithSlash = false;
-
-		string destinationPath = destinationPathObj.toString.decode;
-		string sourcePath = filePath.toString;
-
-		if(!overwrite && destinationPath.exists)
-			throw new DavException(HTTPStatus.preconditionFailed, "Destination already exists.");
-
-		if(isCollection) {
-			if(destinationPath.exists && !destinationPath.isDir) destinationPath.remove;
-
-			destinationPath.mkdirRecurse;
-
-			auto childList = getChildren;
-			foreach(c; childList) {
-				URL childURL = destinationURL;
-				childURL.path = destinationURL.path ~ c.name;
-				c.copy(childURL, overwrite);
-			}
-		} else {
-			string parentPath = Path(destinationPath).parentPath.toString;
-			if(parentPath != "" && !parentPath.exists)
-				throw new DavException(HTTPStatus.conflict, "Conflict. `" ~ parentPath ~ "` does not exist.");
-
-			if(destinationPath.exists && destinationPath.isDir != sourcePath.isDir) {
-				auto destinationResource = dav.getResource(destinationURL);
-				destinationResource.remove;
-				retCode = HTTPStatus.noContent;
-			}
-			sourcePath.copy(destinationPath);
-		}
-
-		super.copy(destinationURL, overwrite);
-
-		return retCode;
-	}
-
-	@testName("copy file")
-	unittest {
-		std.file.write("testFile.txt", "hello!");
-
-		auto dav = new FileDav;
-
-		auto file = dav.getResource(URL("http://127.0.0.1/testFile.txt"));
-		if("testCopy.txt".exists) std.file.remove("testCopy.txt");
-		file.copy(URL("http://127.0.0.1/testCopy.txt"), true);
-
-		assert("hello!" == "testCopy.txt".read);
-
-		std.file.remove("testFile.txt");
-		std.file.remove("testCopy.txt");
-	}
-
-	@testName("copy dir")
-	unittest {
-		"level1/level2".mkdirRecurse;
-		std.file.write("level1/level2/testFile.txt", "hello!");
-
-		auto dav = new FileDav;
-
-		auto file = dav.getResource(URL("http://127.0.0.1/level1"));
-		file.copy(URL("http://127.0.0.1/_test"));
-
-		assert("hello!" == read("_test/level2/testFile.txt"));
-
-		"level1".rmdirRecurse;
-		"_test".rmdirRecurse;
 	}
 
 	override {
@@ -326,7 +188,9 @@ class DavFileResource : DavResource {
 		}
 
 		void setContent(InputStream content, ulong size) {
-			auto strPath = filePath.to!string;
+			if(nativePath.isDir)
+				throw new DavException(HTTPStatus.conflict, "");
+
 			auto tmpPath = filePath.to!string ~ ".tmp";
 			auto tmpFile = File(tmpPath, "w");
 
@@ -339,13 +203,8 @@ class DavFileResource : DavResource {
 			}
 
 			tmpFile.flush;
-			std.file.copy(tmpPath, strPath);
+			std.file.copy(tmpPath, nativePath);
 			std.file.remove(tmpPath);
 		}
 	}
-}
-
-void serveFileDav(URLRouter router, string rootUrl, string rootPath) {
-	FileDav fileDav = new FileDav(rootUrl, rootPath);
-	router.any(rootUrl ~ "*", serveDav(fileDav));
 }

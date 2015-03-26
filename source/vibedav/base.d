@@ -10,6 +10,7 @@ public import vibedav.prop;
 public import vibedav.ifheader;
 public import vibedav.locks;
 public import vibedav.http;
+public import vibedav.user;
 
 import vibe.core.log;
 import vibe.core.file;
@@ -27,10 +28,17 @@ import std.path;
 import std.digest.md;
 import std.datetime;
 import std.string;
-import std.stdio : writeln; //todo: remove this
+import std.stdio; //todo: remove this
 import std.typecons;
 import std.uri;
 import tested;
+
+class DavStorage {
+	static {
+		DavLockList locks;
+		DavProp[string] resourcePropStorage;
+	}
+}
 
 class DavException : Exception {
 	HTTPStatus status;
@@ -61,28 +69,28 @@ enum DavDepth : int {
 
 /// Represents a general DAV resource
 class DavResource {
-	string href; //TODO: Where I set this?
-	string username;
+	string href;
 	URL url;
+	IDavUser user;
 
 	protected {
-		Dav dav;
+		IDav dav;
 		DavProp properties; //TODO: Maybe I should move this to Dav class, or other storage
 	}
 
-	this(Dav dav, URL url) {
+	this(IDav dav, URL url) {
 		this.dav = dav;
 		this.url = url;
 
 		string strUrl = url.toString;
 
-		if(strUrl !in dav.resourcePropStorage) {
-			dav.resourcePropStorage[strUrl] = new DavProp;
-			dav.resourcePropStorage[strUrl].addNamespace("d", "DAV:");
-			dav.resourcePropStorage[strUrl]["d:resourcetype"] = "";
+		if(strUrl !in DavStorage.resourcePropStorage) {
+			DavStorage.resourcePropStorage[strUrl] = new DavProp;
+			DavStorage.resourcePropStorage[strUrl].addNamespace("d", "DAV:");
+			DavStorage.resourcePropStorage[strUrl]["d:resourcetype"] = "";
 		}
 
-		this.properties = dav.resourcePropStorage[strUrl];
+		this.properties = DavStorage.resourcePropStorage[strUrl];
 	}
 
 	@property {
@@ -111,7 +119,8 @@ class DavResource {
 
 	DavProp property(string key) {
 
-		writeln("2. key:", key);
+		if(user !is null && user.hasProperty(key))
+			return DavProp.FromKeyAndList(key, user.property(key));
 
 		switch (key) {
 
@@ -132,8 +141,8 @@ class DavResource {
 		    	string strLocks;
 		    	bool[string] headerLocks;
 
-		    	if(dav.locks.lockedParentResource(url).length > 0) {
-		    		auto list = dav.locks[fullURL];
+		    	if(DavStorage.locks.lockedParentResource(url).length > 0) {
+		    		auto list = DavStorage.locks[fullURL];
 		    		foreach(lock; list)
 		    			strLocks ~= lock.toString;
 		    	}
@@ -152,21 +161,13 @@ class DavResource {
 							            </d:lockentry>
 							          </d:supportedlock>");
 
-	case "displayname:DAV:":
-		writeln("displayname:", name,":");
-		return new DavProp("DAV:", "displayname", name);
-
-
-/*<A:principal-collection-set/>
-<A:principal-URL/>
-<A:resource-id/>
-<A:current-user-principal/>
-<A:supported-report-set/>*/
+			case "displayname:DAV:":
+				return new DavProp("DAV:", "displayname", name);
 
     	}
 	}
 
-	void filterProps(DavProp parent, bool[string] props = cast(bool[string])[]) {
+	void filterProps(DavProp parent, bool[string] props) {
 		DavProp item = new DavProp;
 		item.parent = parent;
 		item.name = "d:response";
@@ -180,6 +181,7 @@ class DavResource {
 			auto splitPos = key.indexOf(":");
 			auto tagName = key[0..splitPos];
 			auto tagNameSpace = key[splitPos+1..$];
+
 
 			try {
 				p = property(key);
@@ -199,9 +201,8 @@ class DavResource {
 			propStat.name = "d:propstat";
 			propStat["d:prop"] = "";
 
-			foreach(p; result[code]) {
+			foreach(p; result[code])
 				propStat["d:prop"].addChild(p);
-			}
 
 			propStat["d:status"] = `HTTP/1.1 ` ~ code.to!string ~ ` ` ~ httpStatusText(code);
 			item.addChild(propStat);
@@ -262,39 +263,38 @@ class DavResource {
 		result ~= `</d:response></d:multistatus>`;
 
 		string strUrl = url.toString;
-		dav.resourcePropStorage[strUrl] = properties;
+		DavStorage.resourcePropStorage[strUrl] = properties;
 
 		return result;
 	}
 
 	void setProp(string name, DavProp prop) {
 		properties[name] = prop;
-		dav.resourcePropStorage[url.toString][name] = prop;
+		DavStorage.resourcePropStorage[url.toString][name] = prop;
 	}
 
 	void removeProp(string name) {
 		string urlStr = url.toString;
 
 		if(name in properties) properties.remove(name);
-		if(name in dav.resourcePropStorage[urlStr]) dav.resourcePropStorage[urlStr].remove(name);
+		if(name in DavStorage.resourcePropStorage[urlStr]) DavStorage.resourcePropStorage[urlStr].remove(name);
 	}
 
 	void remove() {
 		string strUrl = url.toString;
 
-		if(strUrl in dav.resourcePropStorage)
-			dav.resourcePropStorage.remove(strUrl);
+		if(strUrl in DavStorage.resourcePropStorage)
+			DavStorage.resourcePropStorage.remove(strUrl);
 	}
 
 	HTTPStatus copy(URL destinationURL, bool overwrite = false) {
-		dav.resourcePropStorage[destinationURL.toString] = dav.resourcePropStorage[url.toString];
+		DavStorage.resourcePropStorage[destinationURL.toString] = DavStorage.resourcePropStorage[url.toString];
 
 		return HTTPStatus.ok;
 	}
 
 	abstract {
 		DavResource[] getChildren(ulong depth = 1);
-		HTTPStatus move(URL newPath, bool overwrite = false);
 		void setContent(const ubyte[] content);
 		void setContent(InputStream content, ulong size);
 
@@ -309,49 +309,47 @@ class DavResource {
 }
 
 interface IDav {
-	abstract {
-		DavResource getResource(URL url);
-		DavResource createCollection(URL url);
-		DavResource createProperty(URL url);
+	DavResource getResource(URL url);
+	DavResource createCollection(URL url);
+	DavResource createProperty(URL url);
 
-		void options(DavRequest request, DavResponse response);
-		void propfind(DavRequest request, DavResponse response);
-		void lock(DavRequest request, DavResponse response);
-		void get(DavRequest request, DavResponse response);
-		void put(DavRequest request, DavResponse response);
-		void proppatch(DavRequest request, DavResponse response);
-		void mkcol(DavRequest request, DavResponse response) ;
-		void remove(DavRequest request, DavResponse response);
-		void move(DavRequest request, DavResponse response);
-		void copy(DavRequest request, DavResponse response);
-	}
+	void options(DavRequest request, DavResponse response);
+	void propfind(DavRequest request, DavResponse response);
+	void lock(DavRequest request, DavResponse response);
+	void get(DavRequest request, DavResponse response);
+	void put(DavRequest request, DavResponse response);
+	void proppatch(DavRequest request, DavResponse response);
+	void mkcol(DavRequest request, DavResponse response) ;
+	void remove(DavRequest request, DavResponse response);
+	void move(DavRequest request, DavResponse response);
+	void copy(DavRequest request, DavResponse response);
+
+	@property
+	Path rootUrl();
 }
 
 abstract class DavBase : IDav {
-	protected Path rootUrl;
+	protected Path _rootUrl;
 
-	DavProp[string] resourcePropStorage;
-	DavLockList locks;
-
-	abstract DavResource getResource(URL url);
-	abstract DavResource createCollection(URL url);
-	abstract DavResource createProperty(URL url);
+	@property
+	Path rootUrl() {
+		return _rootUrl;
+	}
 
 	this(string rootUrl) {
-		this.rootUrl = checkPath(Path(rootUrl));
+		_rootUrl = rootUrl;
+		_rootUrl.endsWithSlash = true;
+		DavStorage.locks = new DavLockList;
 	}
 
 	protected {
 		DavResource getOrCreateResource(URL url, out int status) {
 			DavResource resource;
 
-			try {
+			if(exists(url)) {
 				resource = getResource(url);
 				status = HTTPStatus.ok;
-			} catch (DavException e) {
-				if(e.status != HTTPStatus.notFound)
-					throw e;
-
+			} else {
 				resource = createProperty(url);
 				status = HTTPStatus.created;
 			}
@@ -359,11 +357,21 @@ abstract class DavBase : IDav {
 			return resource;
 		}
 
-		Path checkPath(Path path) {
-			if(!path.endsWithSlash) {
-				return Path(path.toNativeString ~ "/");
+		bool exists(URL url) {
+			try {
+				getResource(url);
+			} catch (DavException e) {
+				if(e.status != HTTPStatus.notFound)
+					throw e;
+
+				return false;
 			}
 
+			return true;
+		}
+
+		Path checkPath(Path path) {
+			path.endsWithSlash = true;
 			return path;
 		}
 	}
@@ -372,22 +380,24 @@ abstract class DavBase : IDav {
 
 /// The main DAV protocol implementation
 abstract class Dav : DavBase {
+	IDavUserCollection userCollection;
 
 	this(string rootUrl) {
 		super(rootUrl);
-		locks = new DavLockList;
 	}
 
 	private {
 		bool[string] propList(DavProp document) {
 			bool[string] list;
 
+			if(document is null)
+				return list;
+
 			auto properties = document["propfind"]["prop"];
 
 			if(properties.length > 0)
-				foreach(string key, p; properties) {
+				foreach(string key, p; properties)
 					list[p.tagName ~ ":" ~ p.namespace] = true;
-				}
 
 			return list;
 		}
@@ -407,27 +417,18 @@ abstract class Dav : DavBase {
 	void propfind(DavRequest request, DavResponse response) {
 		bool[string] requestedProperties = propList(request.content);
 
+		DavResource[] list;
+
 		auto selectedResource = getResource(request.url);
-		selectedResource.username = request.username;
-		writeln("request.username ", request.username);
+		selectedResource.user = userCollection.GetDavUser(request.username);
 
-		auto pfResponse = new PropfindResponse();
-		pfResponse.list ~= selectedResource;
-
+		list ~= selectedResource;
 		if(selectedResource.isCollection)
-			pfResponse.list ~= selectedResource.getChildren(request.depth);
+			list ~= selectedResource.getChildren(request.depth);
 
-		response.statusCode = HTTPStatus.multiStatus;
-		response.mimeType = "application/xml";
-
-		if(requestedProperties.length == 0)
-			response.content = pfResponse.toString;
-		else
-			response.content = pfResponse.toStringProps(requestedProperties);
-
+		response.setPropContent(list, requestedProperties);
 		response.flush;
 	}
-
 
 	void lock(DavRequest request, DavResponse response) {
 		auto ifHeader = request.ifCondition;
@@ -439,20 +440,20 @@ abstract class Dav : DavBase {
 		if(request.contentLength != 0) {
 			currentLock = DavLockInfo.fromXML(request.content, resource);
 
-			if(currentLock.scopeLock == DavLockInfo.Scope.sharedLock && locks.hasExclusiveLock(resource.fullURL))
+			if(currentLock.scopeLock == DavLockInfo.Scope.sharedLock && DavStorage.locks.hasExclusiveLock(resource.fullURL))
 				throw new DavException(HTTPStatus.locked, "Already has an exclusive locked.");
-			else if(currentLock.scopeLock == DavLockInfo.Scope.exclusiveLock && locks.hasLock(resource.fullURL))
+			else if(currentLock.scopeLock == DavLockInfo.Scope.exclusiveLock && DavStorage.locks.hasLock(resource.fullURL))
 				throw new DavException(HTTPStatus.locked, "Already locked.");
 			else if(currentLock.scopeLock == DavLockInfo.Scope.exclusiveLock)
-				locks.check(request.url, ifHeader);
+				DavStorage.locks.check(request.url, ifHeader);
 
-			locks.add(currentLock);
+			DavStorage.locks.add(currentLock);
 		} else if(request.contentLength == 0) {
 			string uuid = ifHeader.getAttr("", resource.href);
 
 			auto tmpUrl = resource.url;
 			while(currentLock is null) {
-				currentLock = locks[tmpUrl.toString, uuid];
+				currentLock = DavStorage.locks[tmpUrl.toString, uuid];
 				tmpUrl = tmpUrl.parentURL;
 			}
 		} else if(ifHeader.isEmpty)
@@ -472,7 +473,7 @@ abstract class Dav : DavBase {
 	void unlock(DavRequest request, DavResponse response) {
 		auto resource = getResource(request.url);
 
-		locks.remove(resource, request.lockToken);
+		DavStorage.locks.remove(resource, request.lockToken);
 
 		response.statusCode = HTTPStatus.noContent;
 		response.flush;
@@ -493,7 +494,7 @@ abstract class Dav : DavBase {
 		}
 
 		response.flush(resource);
-		locks.setETag(resource.url, resource.eTag);
+		DavStorage.locks.setETag(resource.url, resource.eTag);
 	}
 
 	void head(DavRequest request, DavResponse response) {
@@ -511,17 +512,17 @@ abstract class Dav : DavBase {
 		}
 
 		response.flush;
-		locks.setETag(resource.url, resource.eTag);
+		DavStorage.locks.setETag(resource.url, resource.eTag);
 	}
 
 	void put(DavRequest request, DavResponse response) {
 		DavResource resource = getOrCreateResource(request.url, response.statusCode);
 
-		locks.check(request.url, request.ifCondition);
+		DavStorage.locks.check(request.url, request.ifCondition);
 
 		resource.setContent(request.stream, request.contentLength);
 
-		locks.setETag(resource.url, resource.eTag);
+		DavStorage.locks.setETag(resource.url, resource.eTag);
 
 		response.statusCode = HTTPStatus.created;
 		response.flush;
@@ -531,8 +532,7 @@ abstract class Dav : DavBase {
 		auto ifHeader = request.ifCondition;
 		response.statusCode = HTTPStatus.ok;
 
-		locks.check(request.url, ifHeader);
-
+		DavStorage.locks.check(request.url, ifHeader);
 		DavResource resource = getResource(request.url);
 
 		auto xmlString = resource.propPatch(request.content);
@@ -548,11 +548,12 @@ abstract class Dav : DavBase {
 			throw new DavException(HTTPStatus.unsupportedMediaType, "Body must be empty");
 
 		try auto resource = getResource(request.url.parentURL);
+
 		catch (DavException e)
 			if(e.status == HTTPStatus.notFound)
 				throw new DavException(HTTPStatus.conflict, "Missing parent");
 
-		locks.check(request.url, ifHeader);
+		DavStorage.locks.check(request.url, ifHeader);
 
 		response.statusCode = HTTPStatus.created;
 		createCollection(request.url);
@@ -569,7 +570,7 @@ abstract class Dav : DavBase {
 			throw new DavException(HTTPStatus.conflict, "Missing parent");
 
 		auto resource = getResource(url);
-		locks.check(url, ifHeader);
+		DavStorage.locks.check(url, ifHeader);
 
 		resource.remove();
 		response.flush;
@@ -579,20 +580,147 @@ abstract class Dav : DavBase {
 		auto ifHeader = request.ifCondition;
 		auto resource = getResource(request.url);
 
-		locks.check(request.url, ifHeader);
-		locks.check(request.destination, ifHeader);
+		DavStorage.locks.check(request.url, ifHeader);
+		DavStorage.locks.check(request.destination, ifHeader);
 
-		response.statusCode = resource.move(request.destination, request.overwrite);
+		copy(request, response);
+		remove(request, response);
+
 		response.flush;
 	}
 
 	void copy(DavRequest request, DavResponse response) {
-		auto resource = getResource(request.url);
 
-		locks.check(request.destination, request.ifCondition);
+		URL getDestinationUrl(DavResource source) {
+			string strSrcUrl = request.url.toString;
+			string strDestUrl = request.destination.toString;
 
-		response.statusCode = resource.copy(request.destination, request.overwrite);
+			return URL(strDestUrl ~ source.url.toString[strSrcUrl.length..$]);
+		}
+
+		void localCopy(DavResource source, DavResource destination) {
+			source.copy(destination.url);
+
+			if(source.isCollection) {
+				auto list = source.getChildren(DavDepth.infinity);
+
+				foreach(child; list) {
+					auto destinationUrl = getDestinationUrl(child);
+
+					if(child.isCollection && !exists(destinationUrl)) {
+						auto destinationChild = createCollection(getDestinationUrl(child));
+						child.copy(destinationChild.url, request.overwrite);
+					} else if(!child.isCollection) {
+						HTTPStatus statusCode;
+						DavResource destinationChild = getOrCreateResource(getDestinationUrl(child), statusCode);
+						destinationChild.setContent(child.stream, child.contentLength);
+						child.copy(destinationChild.url, request.overwrite);
+					}
+				}
+			} else {
+				destination.setContent(source.stream, source.contentLength);
+			}
+		}
+
+		DavResource source = getResource(request.url);
+		DavResource destination;
+		HTTPStatus destinationStatus;
+
+		DavStorage.locks.check(request.destination, request.ifCondition);
+
+		if(!exists(request.destination.parentURL))
+			throw new DavException(HTTPStatus.conflict, "Conflict. `" ~ request.destination.parentURL.toString ~ "` does not exist.");
+
+		if(!request.overwrite && exists(request.destination))
+			throw new DavException(HTTPStatus.preconditionFailed, "Destination already exists.");
+
+		response.statusCode = HTTPStatus.created;
+		if(exists(request.destination)) {
+			destination = getResource(request.destination);
+		}
+
+		response.statusCode = HTTPStatus.created;
+
+		URL destinationUrl = request.destination;
+
+		if(destination !is null && destination.isCollection && !source.isCollection) {
+			destinationUrl.path = destinationUrl.path ~ source.url.path.head;
+			destination = null;
+			response.statusCode = HTTPStatus.noContent;
+		}
+
+		if(destination is null) {
+			if(source.isCollection)
+				destination = createCollection(destinationUrl);
+			else
+				destination = createProperty(destinationUrl);
+		}
+
+		localCopy(source, destination);
+
 		response.flush;
+	}
+}
+
+/// File dav impplementation
+class DavFs(T) : Dav {
+	protected {
+		Path _rootFile;
+	}
+
+	this() {
+		this("","");
+	}
+
+	this(string rootUrl, string _rootFile) {
+		super(rootUrl);
+		this._rootFile = Path(_rootFile);
+	}
+
+	Path filePath(URL url) {
+		return _rootFile ~ url.path.toString[rootUrl.toString.length..$];
+	}
+
+	DavResource getResource(URL url) {
+		auto filePath = filePath(url);
+
+		if(!filePath.toString.exists)
+			throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
+
+		return new T(this, url);
+	}
+
+	DavResource createCollection(URL url) {
+		auto filePath = filePath(url);
+
+		if(filePath.toString.exists)
+			throw new DavException(HTTPStatus.methodNotAllowed, "plain/text");
+
+		mkdir(filePath.toString);
+
+		return new T(this, url);
+	}
+
+	DavResource createProperty(URL url) {
+		auto filePath = filePath(url);
+		auto strFilePath = filePath.toString;
+
+		if(strFilePath.exists)
+			throw new DavException(HTTPStatus.methodNotAllowed, "plain/text");
+
+		if(filePath.endsWithSlash) {
+			strFilePath.mkdirRecurse;
+		} else {
+			auto f = new File(strFilePath, "w");
+			f.close;
+		}
+
+		return new T(this, url);
+	}
+
+	@property
+	Path rootFile() {
+		return _rootFile;
 	}
 }
 
@@ -600,7 +728,6 @@ HTTPServerRequestDelegate serveDav(T : Dav)(T dav) {
 	void callback(HTTPServerRequest req, HTTPServerResponse res)
 	{
 		try {
-
 			debug {
 				writeln("\n\n\n");
 
@@ -656,4 +783,10 @@ HTTPServerRequestDelegate serveDav(T : Dav)(T dav) {
 	}
 
 	return &callback;
+}
+
+void serveDavFs(T)(URLRouter router, string rootUrl, string rootPath, IDavUserCollection userCollection) {
+	auto fileDav = new DavFs!T(rootUrl, rootPath);
+	fileDav.userCollection = userCollection;
+	router.any(rootUrl ~ "*", serveDav(fileDav));
 }

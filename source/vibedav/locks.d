@@ -187,12 +187,7 @@ class DavLockList {
 		if(!checkCondition(url, header))
 			throw new DavException(HTTPStatus.preconditionFailed, "Precondition failes.");
 
-
 		auto mustResolve = lockedParentResource(url);
-
-		writeln("locks: ", locks );
-		writeln("mustResolve ", mustResolve);
-		writeln("with ", header.getLocks(url.toString));
 
 		if(!canResolve(mustResolve, header.getLocks(url.toString)))
 			throw new DavException(HTTPStatus.locked, "Locked.");

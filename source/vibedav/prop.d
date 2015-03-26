@@ -68,11 +68,38 @@ class DavProp {
 	}
 
 	this(string value) {
-		this();
 		this.value = value;
 	}
 
 	this() {}
+
+	/// A key is a tag name glued with a `:` and the namespace
+	static {
+		DavProp FromKeyAndList(string key, string[][string] values) {
+			auto pos = key.indexOf(":");
+			auto name = key[0..pos];
+			auto ns = key[pos+1..$];
+
+			DavProp p = new DavProp(ns, name, "");
+
+			foreach(nsName, nsList; values)
+				foreach(value; nsList) {
+					DavProp child = DavProp.FromKey(nsName, value);
+
+					p.properties ~= child;
+				}
+
+			return p;
+		}
+
+		DavProp FromKey(string key, string value) {
+			auto pos = key.indexOf(":");
+			auto name = key[0..pos];
+			auto ns = key[pos+1..$];
+
+			return new DavProp(ns, name, value);
+		}
+	}
 
 	private {
 		ulong getKeyPos(string key) inout {
@@ -492,6 +519,26 @@ unittest {
 	prop["D:name"]["D:val"] = "";
 
 	assert(prop["D:name"]["D:val"].namespace == "DAV:");
+}
+
+@name("create FromKey")
+unittest {
+	auto p = DavProp.FromKey("A:DAV:", "value");
+
+	assert(p.name == "A");
+	assert(p.namespace == "DAV:");
+	assert(p.value == "value");
+}
+
+@name("create FromKeyAndList")
+unittest {
+	string[][string] value;
+	value["href:DAV:"] = [];
+	value["href:DAV:"] ~= [ "value" ];
+
+	auto p = DavProp.FromKeyAndList("A:DAV:", value);
+
+	assert(p.toString == `<A xmlns="DAV:"><href xmlns="DAV:">value</href></A>`);
 }
 
 string normalize(const string text) {

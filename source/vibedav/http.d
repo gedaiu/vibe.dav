@@ -153,13 +153,28 @@ struct DavResponse {
 
 	void flush() {
 		response.statusCode = statusCode;
-		writeln("\n", _content);
+		debug writeln("\n", _content);
 		response.writeBody(_content, response.headers["Content-Type"]);
 	}
 
 	void flush(DavResource resource) {
 		response.statusCode = statusCode;
 		response.writeRawBody(resource.stream);
+	}
+
+	void setPropContent (DavResource[] list, bool[string] props) {
+		import std.stdio;
+		statusCode = HTTPStatus.multiStatus;
+		mimeType = "application/xml";
+
+		string str = `<?xml version="1.0" encoding="UTF-8"?>`;
+		auto response = parseXMLProp(`<d:multistatus xmlns:d="DAV:"></d:multistatus>`);
+
+		foreach(item; list) {
+			item.filterProps(response["d:multistatus"], props);
+		}
+
+		_content =  str ~ response.toString;
 	}
 }
 
@@ -259,7 +274,6 @@ struct DavRequest {
 			return IfHeader.parse(getHeader!"If"(request.headers));
 		}
 
-
 		URL destination() {
 			return URL(getHeader!"Destination"(request.headers));
 		}
@@ -270,7 +284,6 @@ struct DavRequest {
 
 		static DavRequest Create() {
 			HTTPServerRequest req = new HTTPServerRequest(Clock.currTime, 0);
-
 			return DavRequest(req);
 		}
 
@@ -295,27 +308,3 @@ struct DavRequest {
 		return true;
 	}
 }
-
-/// A structure that helps to create the propfind response
-struct PropfindResponse {
-
-	DavResource list[];
-
-	string toString() {
-		bool[string] props;
-		return toStringProps(props);
-	}
-
-	string toStringProps(bool[string] props) {
-		string str = `<?xml version="1.0" encoding="UTF-8"?>`;
-		auto response = parseXMLProp(`<d:multistatus xmlns:d="DAV:"></d:multistatus>`);
-
-		foreach(item; list) {
-			item.filterProps(response["d:multistatus"], props);
-		}
-
-		return str ~ response.toString;
-	}
-}
-
-

@@ -70,7 +70,7 @@ class DavCalendarBaseResource : DavResource, ICalendarCollectionProperties {
 	}
 
 	@property {
-		string[] extraSupport() {
+		override string[] extraSupport() {
 			string[] headers = ["access-control", "calendar-access"];
 			return headers;
 		}
@@ -105,58 +105,60 @@ class DavFileCalendarResource : DavCalendarBaseResource {
 	}
 
 
-	DavProp property(string key) {
+	override {
+		DavProp property(string key) {
 
-		if(hasDavInterfaceProperties!ICalendarCollectionProperties(key))
-			return getDavInterfaceProperties!ICalendarCollectionProperties(key, this);
+			if(hasDavInterfaceProperties!ICalendarCollectionProperties(key))
+				return getDavInterfaceProperties!ICalendarCollectionProperties(key, this);
 
-		return super.property(key);
-	}
-
-	override DavResource[] getChildren(ulong depth = 1) {
-		DavResource[] list;
-
-		string listPath = nativePath.decode;
-
-		return getFolderContent!DavFileCalendarResource(listPath, url, dav, depth);
-	}
-
-	override void setContent(const ubyte[] content) {
-		std.stdio.write(nativePath, content);
-	}
-
-	override void setContent(InputStream content, ulong size) {
-		if(nativePath.isDir)
-			throw new DavException(HTTPStatus.conflict, "");
-
-		auto tmpPath = filePath.to!string ~ ".tmp";
-		auto tmpFile = File(tmpPath, "w");
-
-		while(!content.empty) {
-			auto leastSize = content.leastSize;
-			ubyte[] buf;
-			buf.length = leastSize;
-			content.read(buf);
-			tmpFile.rawWrite(buf);
+			return super.property(key);
 		}
 
-		tmpFile.flush;
-		std.file.copy(tmpPath, nativePath);
-		std.file.remove(tmpPath);
-	}
+		DavResource[] getChildren(ulong depth = 1) {
+			DavResource[] list;
 
-	override void remove() {
-		super.remove;
+			string listPath = nativePath.decode;
 
-		if(isCollection) {
-			auto childList = getChildren;
+			return getFolderContent!DavFileCalendarResource(listPath, url, dav, depth);
+		}
 
-			foreach(c; childList)
-				c.remove;
+		void setContent(const ubyte[] content) {
+			std.stdio.write(nativePath, content);
+		}
 
-			nativePath.rmdir;
-		} else
-			nativePath.remove;
+		void setContent(InputStream content, ulong size) {
+			if(nativePath.isDir)
+				throw new DavException(HTTPStatus.conflict, "");
+
+			auto tmpPath = filePath.to!string ~ ".tmp";
+			auto tmpFile = File(tmpPath, "w");
+
+			while(!content.empty) {
+				auto leastSize = content.leastSize;
+				ubyte[] buf;
+				buf.length = leastSize;
+				content.read(buf);
+				tmpFile.rawWrite(buf);
+			}
+
+			tmpFile.flush;
+			std.file.copy(tmpPath, nativePath);
+			std.file.remove(tmpPath);
+		}
+
+		void remove() {
+			super.remove;
+
+			if(isCollection) {
+				auto childList = getChildren;
+
+				foreach(c; childList)
+					c.remove;
+
+				nativePath.rmdir;
+			} else
+				nativePath.remove;
+		}
 	}
 
 	@property {

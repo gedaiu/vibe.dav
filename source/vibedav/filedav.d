@@ -74,6 +74,30 @@ FileStream toStream(string path) {
 	return openFile(path);
 }
 
+DavResource[] getFolderContent(T)(string path, URL url, DavFs!T dav, ulong depth = 1) {
+	DavResource[] list;
+
+	if(depth == 0) return list;
+
+	auto fileList = dirEntries(path, "*", SpanMode.shallow);
+
+	foreach(file; fileList) {
+		string fileName = baseName(file.name);
+
+		URL childUrl = url;
+		childUrl.path = childUrl.path ~ fileName;
+
+   		auto resource = new T(dav, childUrl);
+
+   		list ~= resource;
+
+   		if(resource.isCollection && depth > 0)
+   			list ~= resource.getChildren(depth - 1);
+	}
+
+	return list;
+}
+
 /// Represents a file or directory DAV resource
 class DavFileResource : DavResource {
 	alias DavFsType = DavFs!DavFileResource;
@@ -98,23 +122,20 @@ class DavFileResource : DavResource {
 		if(!nativePath.exists)
 			throw new DavException(HTTPStatus.notFound, "File not found.");
 
-		properties["d:creationdate"] = new DavProp(nativePath.creationDate.toRFC822DateTimeString);
-
-		if(nativePath.isDir)
-			isCollection = true;
-		else
-			properties["d:getcontenttype"] = new DavProp(getMimeTypeForFile(nativePath));
-
 		href = path.toString;
 	}
 
-	@property override {
+	@property {
 		string eTag() {
 			return nativePath.eTag;
 		}
 
-		string mimeType() {
+		string contentType() {
 			return getMimeTypeForFile(nativePath);
+		}
+
+		SysTime creationDate() {
+			return nativePath.creationDate;
 		}
 
 		SysTime lastModified() {
@@ -125,7 +146,11 @@ class DavFileResource : DavResource {
 			return nativePath.contentLength;
 		}
 
-		InputStream stream() {
+		bool isCollection() {
+			return nativePath.isDir;
+		}
+
+		override InputStream stream() {
 			return nativePath.toStream;
 		}
 	}
@@ -133,27 +158,9 @@ class DavFileResource : DavResource {
 	override DavResource[] getChildren(ulong depth = 1) {
 		DavResource[] list;
 
-		if(depth == 0) return list;
-		string listPath = filePath.toString.decode;
-		string rootPath = dav.rootFile.toString.decode;
+		string listPath = nativePath.decode;
 
-		auto fileList = dirEntries(listPath, "*", SpanMode.shallow);
-
-		foreach(file; fileList) {
-			string fileName = baseName(file.name);
-
-			URL childUrl = url;
-			childUrl.path = childUrl.path ~ fileName;
-
-	   		auto resource = new DavFileResource(this.dav, childUrl);
-
-	   		list ~= resource;
-
-	   		if(resource.isCollection && depth > 0)
-	   			list ~= resource.getChildren(depth - 1);
-		}
-
-		return list;
+		return getFolderContent(listPath, url, dav, depth);
 	}
 
 	override void remove() {
@@ -165,9 +172,9 @@ class DavFileResource : DavResource {
 			foreach(c; childList)
 				c.remove;
 
-			filePath.toString.rmdir;
+			nativePath.rmdir;
 		} else
-			filePath.toString.remove;
+			nativePath.remove;
 	}
 
 	@testName("exists")
@@ -183,8 +190,7 @@ class DavFileResource : DavResource {
 
 	override {
 		void setContent(const ubyte[] content) {
-			immutable string p = filePath.to!string;
-			std.stdio.write(p, content);
+			std.stdio.write(nativePath, content);
 		}
 
 		void setContent(InputStream content, ulong size) {

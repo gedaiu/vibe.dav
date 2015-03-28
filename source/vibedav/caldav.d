@@ -7,9 +7,12 @@
 module vibedav.caldav;
 
 public import vibedav.base;
+import vibedav.filedav;
 
 import vibe.core.file;
 import vibe.http.server;
+import vibe.inet.mimetypes;
+import vibe.inet.message;
 
 import std.conv : to;
 import std.algorithm;
@@ -25,12 +28,52 @@ import std.uuid;
 
 import tested;
 
-class DavCalendarBaseResource : DavResource {
+
+interface ICalendarCollectionProperties {
+
+	@property {
+		@ResourceProperty("calendar-description", "urn:ietf:params:xml:ns:caldav")
+		string calendarDescription();
+
+		@ResourceProperty("calendar-timezone", "urn:ietf:params:xml:ns:caldav")
+		TimeZone calendarTimezone();
+
+		@ResourceProperty("supported-calendar-component-set", "urn:ietf:params:xml:ns:caldav")
+		string[] supportedCalendarComponentSet();
+
+		@ResourceProperty("supported-calendar-data", "urn:ietf:params:xml:ns:caldav")
+		string[] supportedCalendarData();
+
+		@ResourceProperty("max-resource-size", "urn:ietf:params:xml:ns:caldav")
+		ulong maxResourceSize();
+
+		@ResourceProperty("min-date-time", "urn:ietf:params:xml:ns:caldav")
+		SysTime minDateTime();
+
+		@ResourceProperty("max-date-time", "urn:ietf:params:xml:ns:caldav")
+		SysTime maxDateTime();
+
+		@ResourceProperty("max-instances", "urn:ietf:params:xml:ns:caldav")
+		ulong maxInstances();
+
+		@ResourceProperty("max-attendees-per-instance", "urn:ietf:params:xml:ns:caldav")
+		ulong maxAttendeesPerInstance();
+	}
+}
+
+class DavCalendarBaseResource : DavResource, ICalendarCollectionProperties {
 	protected IDav dav;
 
 	this(IDav dav, URL url) {
 		super(dav, url);
 		this.dav = dav;
+	}
+
+	@property {
+		string[] extraSupport() {
+			string[] headers = ["access-control", "calendar-access"];
+			return headers;
+		}
 	}
 }
 
@@ -38,54 +81,152 @@ class DavCalendarBaseResource : DavResource {
 class DavFileCalendarResource : DavCalendarBaseResource {
 	alias DavFsType = DavFs!DavFileCalendarResource;
 
-	string description; //CALDAV:calendar-description
-	TimeZone timezone;  //CALDAV:calendar-timezone
-	//CALDAV:supported-calendar-component-set
-	//CALDAV:supported-calendar-data
-    //CALDAV:max-resource-size
-    SysTime minDate; //CALDAV:min-date-time
-    SysTime maxDate; //CALDAV:max-date-time
-    ulong maxInstances; //CALDAV:max-instances
-   	ulong maxAttendeesPerInstance; //CALDAV:max-attendees-per-instance
-
-	protected immutable Path filePath;
+	protected {
+		immutable Path filePath;
+		immutable string nativePath;
+		DavFsType dav;
+	}
 
 	this(DavFsType dav, URL url) {
 		super(dav, url);
+
+		this.dav = dav;
+		auto path = url.path;
+
+		path.normalize;
+
 		filePath = dav.filePath(url);
+		nativePath = filePath.toNativeString();
+
+		if(!nativePath.exists)
+			throw new DavException(HTTPStatus.notFound, "File not found.");
+
+		href = path.toString;
+	}
+
+
+	DavProp property(string key) {
+
+		if(hasDavInterfaceProperties!ICalendarCollectionProperties(key))
+			return getDavInterfaceProperties!ICalendarCollectionProperties(key, this);
+
+		return super.property(key);
 	}
 
 	override DavResource[] getChildren(ulong depth = 1) {
-		throw new DavException(HTTPStatus.notImplemented, "Can not .");
+		DavResource[] list;
+
+		string listPath = nativePath.decode;
+
+		return getFolderContent!DavFileCalendarResource(listPath, url, dav, depth);
 	}
 
 	override void setContent(const ubyte[] content) {
-		throw new DavException(HTTPStatus.notImplemented, "not notImplemented");
+		std.stdio.write(nativePath, content);
 	}
 
 	override void setContent(InputStream content, ulong size) {
-		throw new DavException(HTTPStatus.notImplemented, "not notImplemented");
-	}
+		if(nativePath.isDir)
+			throw new DavException(HTTPStatus.conflict, "");
 
-	@property override {
-		string eTag() {
-			throw new DavException(HTTPStatus.notImplemented, "not notImplemented");
+		auto tmpPath = filePath.to!string ~ ".tmp";
+		auto tmpFile = File(tmpPath, "w");
+
+		while(!content.empty) {
+			auto leastSize = content.leastSize;
+			ubyte[] buf;
+			buf.length = leastSize;
+			content.read(buf);
+			tmpFile.rawWrite(buf);
 		}
 
-		string mimeType() {
-			throw new DavException(HTTPStatus.notImplemented, "not notImplemented");
+		tmpFile.flush;
+		std.file.copy(tmpPath, nativePath);
+		std.file.remove(tmpPath);
+	}
+
+	override void remove() {
+		super.remove;
+
+		if(isCollection) {
+			auto childList = getChildren;
+
+			foreach(c; childList)
+				c.remove;
+
+			nativePath.rmdir;
+		} else
+			nativePath.remove;
+	}
+
+	@property {
+
+		string contentType() {
+			return getMimeTypeForFile(nativePath);
+		}
+
+		SysTime creationDate() {
+			return nativePath.creationDate;
+		}
+
+		string eTag() {
+			return nativePath.eTag;
 		}
 
 		SysTime lastModified() {
-			throw new DavException(HTTPStatus.notImplemented, "not notImplemented");
+			return nativePath.lastModified;
 		}
 
 		ulong contentLength() {
-			throw new DavException(HTTPStatus.notImplemented, "not notImplemented");
+			return nativePath.contentLength;
 		}
 
-		InputStream stream() {
-			throw new DavException(HTTPStatus.notImplemented, "not notImplemented");
+		bool isCollection() {
+			return nativePath.isDir;
+		}
+
+		override InputStream stream() {
+			return nativePath.toStream;
+		}
+
+		string calendarDescription() {
+			return name;
+		}
+
+		TimeZone calendarTimezone() {
+			TimeZone t;
+			return t;
+		}
+
+		string[] supportedCalendarComponentSet() {
+			string[] list;
+			return list;
+		}
+
+		string[] supportedCalendarData() {
+			string[] list;
+
+			return list;
+		}
+
+		ulong maxResourceSize() {
+			return ulong.max;
+		}
+
+		SysTime minDateTime() {
+			return SysTime.min;
+		}
+
+		SysTime maxDateTime() {
+			return SysTime.max;
+		}
+
+		ulong maxInstances() {
+			return ulong.max;
+		}
+
+		ulong maxAttendeesPerInstance() {
+			return ulong.max;
 		}
 	}
 }

@@ -225,7 +225,7 @@ struct DavRequest {
 			DavProp document;
 			string requestXml = cast(string)request.bodyReader.readAllUTF8;
 
-			writeln("requestXml:", requestXml);
+			debug writeln("requestXml:", requestXml);
 
 			if(requestXml.length > 0) {
 				try document = requestXml.parseXMLProp;

@@ -20,6 +20,7 @@ import vibe.http.server;
 import vibe.http.fileserver;
 import vibe.http.router : URLRouter;
 import vibe.stream.operations;
+import vibe.internal.meta.uda;
 
 import std.conv : to;
 import std.algorithm;
@@ -32,6 +33,82 @@ import std.stdio; //todo: remove this
 import std.typecons;
 import std.uri;
 import tested;
+
+
+struct ResourceProperty {
+	string name;
+	string ns;
+}
+
+ResourceProperty getResourceProperty(T...)() {
+	static if(T.length == 0)
+		static assert(false, "There is no `@ResourceProperty` attribute.");
+	else static if( is(typeof(T[0]) == ResourceProperty) )
+		return T[0];
+	else
+		return getResourceProperty(T[1..$]);
+}
+
+
+pure bool hasDavInterfaceProperties(I)(string key) {
+	bool result = false;
+
+	void keyExist(T...)() {
+		static if(T.length > 0) {
+			enum val = getResourceProperty!(__traits(getAttributes, __traits(getMember, I, T[0])));
+			enum staticKey = val.name ~ ":" ~ val.ns;
+
+			if(staticKey == key)
+				result = true;
+
+			keyExist!(T[1..$])();
+		}
+	}
+
+	keyExist!(__traits(allMembers, I))();
+
+	return result;
+}
+
+DavProp propFrom(T)(string name, string ns, T value) {
+	string v;
+
+	static if( is(T == string) )
+	{
+		return new DavProp(name, ns, value);
+	}
+	else static if( is(T == SysTime) )
+	{
+		return new DavProp(name, ns, toRFC822DateTimeString(value));
+	}
+	else
+	{
+		return new DavProp(name, ns, value.to!string);
+	}
+}
+
+DavProp getDavInterfaceProperties(I)(string key, I davInterface) {
+	DavProp result;
+
+	void getProp(T...)() {
+		static if(T.length > 0) {
+			enum val = getResourceProperty!(__traits(getAttributes, __traits(getMember, I, T[0])));
+			enum staticKey = val.name ~ ":" ~ val.ns;
+
+			if(staticKey == key) {
+				auto value = __traits(getMember, davInterface, T[0]);
+				pragma(msg, "\n", T[0], " ", typeof(value));
+				result = propFrom(val.name, val.ns, value);
+			}
+
+			getProp!(T[1..$])();
+		}
+	}
+
+	getProp!(__traits(allMembers, I))();
+
+	return result;
+}
 
 class DavStorage {
 	static {
@@ -67,8 +144,31 @@ enum DavDepth : int {
 	infinity = 99
 };
 
+interface IDavResourceProperties {
+
+	@property {
+		@ResourceProperty("creationdate", "DAV:")
+		SysTime creationDate();
+
+		@ResourceProperty("lastmodified", "DAV:")
+		SysTime lastModified();
+
+		@ResourceProperty("getetag", "DAV:")
+		string eTag();
+
+		@ResourceProperty("getcontenttype", "DAV:")
+		string contentType();
+
+		@ResourceProperty("getcontentlength", "DAV:")
+		ulong contentLength();
+
+		@ResourceProperty("resourcetype", "DAV:")
+		bool isCollection();
+	}
+}
+
 /// Represents a general DAV resource
-class DavResource {
+class DavResource : IDavResourceProperties {
 	string href;
 	URL url;
 	IDavUser user;
@@ -87,7 +187,6 @@ class DavResource {
 		if(strUrl !in DavStorage.resourcePropStorage) {
 			DavStorage.resourcePropStorage[strUrl] = new DavProp;
 			DavStorage.resourcePropStorage[strUrl].addNamespace("d", "DAV:");
-			DavStorage.resourcePropStorage[strUrl]["d:resourcetype"] = "";
 		}
 
 		this.properties = DavStorage.resourcePropStorage[strUrl];
@@ -102,18 +201,9 @@ class DavResource {
 			return url.toString;
 		}
 
-		void isCollection(bool value) {
-			if(value)
-				properties["d:resourcetype"]["d:collection"] = "";
-			else
-				properties["d:resourcetype"].remove("d:collection");
-		}
-
-		bool isCollection() {
-			if("d:collection" in properties["d:resourcetype"])
-				return true;
-			else
-				return false;
+		string[] extraSupport() {
+			string[] headers;
+			return headers;
 		}
 	}
 
@@ -122,20 +212,13 @@ class DavResource {
 		if(user !is null && user.hasProperty(key))
 			return DavProp.FromKeyAndList(key, user.property(key));
 
+		if(hasDavInterfaceProperties!IDavResourceProperties(key))
+			return getDavInterfaceProperties!IDavResourceProperties(key, this);
+
 		switch (key) {
 
 			default:
 				return properties[key];
-
-			// RFC4918
-		    case "getcontentlength:DAV:":
-		    	return new DavProp("DAV:", "getcontentlength", contentLength.to!string);
-
-		    case "getetag:DAV:":
-		    	return new DavProp("DAV:", "getetag", `"` ~ eTag ~ `"`);
-
-		    case "getlastmodified:DAV:":
-		  		return new DavProp("DAV:", "getlastmodified", toRFC822DateTimeString(lastModified));
 
 		    case "lockdiscovery:DAV:":
 		    	string strLocks;
@@ -163,7 +246,6 @@ class DavResource {
 
 			case "displayname:DAV:":
 				return new DavProp("DAV:", "displayname", name);
-
     	}
 	}
 
@@ -297,14 +379,7 @@ class DavResource {
 		DavResource[] getChildren(ulong depth = 1);
 		void setContent(const ubyte[] content);
 		void setContent(InputStream content, ulong size);
-
-		@property {
-			string eTag();
-			string mimeType();
-			SysTime lastModified();
-			ulong contentLength();
-			InputStream stream();
-		}
+		@property InputStream stream();
 	}
 }
 
@@ -377,7 +452,6 @@ abstract class DavBase : IDav {
 	}
 }
 
-
 /// The main DAV protocol implementation
 abstract class Dav : DavBase {
 	IDavUserCollection userCollection;
@@ -404,10 +478,14 @@ abstract class Dav : DavBase {
 	}
 
 	void options(DavRequest request, DavResponse response) {
+		DavResource resource = getResource(request.url);
+
 		string path = request.path;
 
+		auto support = (["1", "2", "3"] ~ resource.extraSupport).join(",");
+
 		response["Accept-Ranges"] = "bytes";
-		response["DAV"] = "1,2,3";
+		response["DAV"] = support;
 		response["Allow"] = "OPTIONS, GET, HEAD, DELETE, PROPFIND, PUT, PROPPATCH, COPY, MOVE, LOCK, UNLOCK";
 		response["MS-Author-Via"] = "DAV";
 
@@ -419,7 +497,9 @@ abstract class Dav : DavBase {
 
 		DavResource[] list;
 
+		writeln("1. selectedResource ", request.url);
 		auto selectedResource = getResource(request.url);
+		writeln("2. selectedResource ", selectedResource);
 		selectedResource.user = userCollection.GetDavUser(request.username);
 
 		list ~= selectedResource;
@@ -484,7 +564,7 @@ abstract class Dav : DavBase {
 
 		response["Etag"] = "\"" ~ resource.eTag ~ "\"";
 		response["Last-Modified"] = toRFC822DateTimeString(resource.lastModified);
-		response["Content-Type"] = resource.mimeType;
+		response["Content-Type"] = resource.contentType;
 		response["Content-Length"] = resource.contentLength.to!string;
 
 		if(!request.ifModifiedSince(resource) || !request.ifNoneMatch(resource)) {
@@ -502,7 +582,7 @@ abstract class Dav : DavBase {
 
 		response["Etag"] = "\"" ~ resource.eTag ~ "\"";
 		response["Last-Modified"] = toRFC822DateTimeString(resource.lastModified);
-		response["Content-Type"] = resource.mimeType;
+		response["Content-Type"] = resource.contentType;
 		response["Content-Length"] = resource.contentLength.to!string;
 
 		if(!request.ifModifiedSince(resource) || !request.ifNoneMatch(resource)) {
@@ -697,7 +777,6 @@ class DavFs(T) : Dav {
 			throw new DavException(HTTPStatus.methodNotAllowed, "plain/text");
 
 		mkdir(filePath.toString);
-
 		return new T(this, url);
 	}
 

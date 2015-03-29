@@ -27,7 +27,9 @@ struct ResourcePropertyValue {
 	enum Mode {
 		none,
 		attribute,
-		resourceType
+		tagName,
+		tagAttributes,
+		tag
 	}
 
 	string name;
@@ -39,27 +41,48 @@ struct ResourcePropertyValue {
 		if(mode == Mode.attribute)
 			return createAttribute(val);
 
-		if(mode == Mode.resourceType)
-			return createResourceType(val);
+		if(mode == Mode.tagName)
+			return createTagName(val);
+
+		if(mode == Mode.tag)
+			return createTagText(val);
 
 		return new DavProp(val);
 	}
 
+	DavProp create(string[string] val) {
+		if(mode == Mode.tagAttributes)
+			return createTagList(val);
+
+		throw new DavException(HTTPStatus.internalServerError, "Can't parse value.");
+	}
+
 	DavProp createAttribute(string val) {
-		DavProp p = new DavProp(name, ns);
-		p.attribute[name] = val;
+		DavProp p = new DavProp(ns, name);
+		p.attribute[attr] = val;
 
 		return p;
 	}
 
-	DavProp createResourceType(string val) {
-		if(val == "false")
-			return new DavProp("");
-		else
-			return new DavProp("DAV:", "collection");
+	DavProp createTagName(string val) {
+		return DavProp.FromKey(val, "");
+	}
+
+	DavProp createTagList(string[string] val) {
+		DavProp p = new DavProp(ns, name);
+
+		foreach(k, v; val)
+			p.attribute[k] = v;
+
+		return p;
+	}
+
+	DavProp createTagText(string val) {
+		return new DavProp(ns, name, val);
 	}
 }
 
+/// Make the returned value to be rendered like this: <[name] xmlns="[ns]" [attr]=[value]/>
 ResourcePropertyValue ResourcePropertyValueAttr(string name, string ns, string attr) {
 	ResourcePropertyValue v;
 	v.name = name;
@@ -70,9 +93,30 @@ ResourcePropertyValue ResourcePropertyValueAttr(string name, string ns, string a
 	return v;
 }
 
-ResourcePropertyValue ResourcePropertyResourceType() {
+/// Make the returned value to be a <collection> tag or not
+ResourcePropertyValue ResourcePropertyTagName() {
 	ResourcePropertyValue v;
-	v.mode = ResourcePropertyValue.Mode.resourceType;
+	v.mode = ResourcePropertyValue.Mode.tagName;
+
+	return v;
+}
+
+/// Make the returned value to be <[name] xmlns=[ns] [attribute list]/>
+ResourcePropertyValue ResourcePropertyTagAttributes(string name, string ns) {
+	ResourcePropertyValue v;
+	v.name = name;
+	v.ns = ns;
+	v.mode = ResourcePropertyValue.Mode.tagAttributes;
+
+	return v;
+}
+
+/// Make the returned value to be: <[name] xmlns=[ns]>[value]</[name]>
+ResourcePropertyValue ResourcePropertyTagText(string name, string ns) {
+	ResourcePropertyValue v;
+	v.name = name;
+	v.ns = ns;
+	v.mode = ResourcePropertyValue.Mode.tag;
 
 	return v;
 }
@@ -102,7 +146,7 @@ ResourcePropertyValue getResourceTagProperty(T...)() {
 		return getResourceTagProperty!(T[1..$]);
 }
 
-pure bool hasDavInterfaceProperties(I)(string key) {
+pure bool hasDavInterfaceProperty(I)(string key) {
 	bool result = false;
 
 	void keyExist(T...)() {
@@ -126,6 +170,7 @@ DavProp propFrom(T, U)(string name, string ns, T value, U tagVal) {
 	string v;
 
 	auto p = new DavProp(ns, name);
+	writeln(p);
 
 	static if( is(T == SysTime) )
 	{
@@ -133,6 +178,20 @@ DavProp propFrom(T, U)(string name, string ns, T value, U tagVal) {
 		p.addChild(elm);
 	}
 	else static if( is(T == string[]) )
+	{
+		foreach(item; value) {
+			auto tag = tagVal.create(item);
+			writeln("propFrom 3 ", tag);
+			try
+				p.addChild(tag);
+			catch(Exception e)
+				writeln(e);
+
+			writeln("propFrom 4");
+		}
+		writeln("propFrom 5");
+	}
+	else static if( is(T == string[][string]) )
 	{
 		foreach(item; value) {
 			auto tag = tagVal.create(item);
@@ -148,7 +207,7 @@ DavProp propFrom(T, U)(string name, string ns, T value, U tagVal) {
 	return p;
 }
 
-DavProp getDavInterfaceProperties(I)(string key, I davInterface) {
+DavProp getDavInterfaceProperty(I)(string key, I davInterface) {
 	DavProp result;
 
 	void getProp(T...)() {
@@ -158,9 +217,13 @@ DavProp getDavInterfaceProperties(I)(string key, I davInterface) {
 			enum staticKey = val.name ~ ":" ~ val.ns;
 
 			if(staticKey == key) {
+				writeln("getProp 1 ", key);
 				auto value = __traits(getMember, davInterface, T[0]);
-				pragma(msg, "\n", T[0], " ", typeof(value));
+				writeln("getProp 2 ");
+				pragma(msg, T[0], " ", typeof(value));
+				writeln("getProp 3 ");
 				result = propFrom(val.name, val.ns, value, tagVal);
+				writeln("getProp 4 ");
 			}
 
 			getProp!(T[1..$])();
@@ -198,9 +261,21 @@ interface IDavResourceProperties {
 		ulong contentLength();
 
 		@ResourceProperty("resourcetype", "DAV:")
-		@ResourcePropertyResourceType()
-		bool isCollection();
+		@ResourcePropertyTagName()
+		string[] resourceType();
 	}
+}
+
+interface IDavResourceExtendedProperties {
+
+	@ResourceProperty("add-member", "DAV:")
+	@ResourcePropertyTagText("href", "DAV:")
+	string[] addMember();
+
+	@ResourceProperty("owner", "DAV:")
+	@ResourcePropertyTagText("href", "DAV:")
+	string owner();
+
 }
 
 /// Represents a general DAV resource
@@ -246,30 +321,30 @@ class DavResource : IDavResourceProperties {
 	DavProp property(string key) {
 
 		if(user !is null && user.hasProperty(key))
-			return DavProp.FromKeyAndList(key, user.property(key));
+			return user.property(key);
 
-		if(hasDavInterfaceProperties!IDavResourceProperties(key))
-			return getDavInterfaceProperties!IDavResourceProperties(key, this);
+		if(hasDavInterfaceProperty!IDavResourceProperties(key))
+			return getDavInterfaceProperty!IDavResourceProperties(key, this);
 
 		switch (key) {
 
 			default:
 				return properties[key];
 
-		    case "lockdiscovery:DAV:":
-		    	string strLocks;
-		    	bool[string] headerLocks;
+			case "lockdiscovery:DAV:":
+				string strLocks;
+				bool[string] headerLocks;
 
-		    	if(DavStorage.locks.lockedParentResource(url).length > 0) {
-		    		auto list = DavStorage.locks[fullURL];
-		    		foreach(lock; list)
-		    			strLocks ~= lock.toString;
-		    	}
+				if(DavStorage.locks.lockedParentResource(url).length > 0) {
+				auto list = DavStorage.locks[fullURL];
+					foreach(lock; list)
+						strLocks ~= lock.toString;
+				}
 
-		    	return new DavProp("DAV:", "lockdiscovery", strLocks);
+			return new DavProp("DAV:", "lockdiscovery", strLocks);
 
-		    case "supportedlock:DAV:":
-		    	return new DavProp("<d:supportedlock xmlns:d=\"DAV:\">
+			 case "supportedlock:DAV:":
+				return new DavProp("<d:supportedlock xmlns:d=\"DAV:\">
 							            <d:lockentry>
 							              <d:lockscope><d:exclusive/></d:lockscope>
 							              <d:locktype><d:write/></d:locktype>
@@ -282,7 +357,7 @@ class DavResource : IDavResourceProperties {
 
 			case "displayname:DAV:":
 				return new DavProp("DAV:", "displayname", name);
-    	}
+		}
 	}
 
 	void filterProps(DavProp parent, bool[string] props) {
@@ -300,7 +375,6 @@ class DavResource : IDavResourceProperties {
 			auto tagName = key[0..splitPos];
 			auto tagNameSpace = key[splitPos+1..$];
 
-
 			try {
 				p = property(key);
 				result[200] ~= p;
@@ -314,17 +388,19 @@ class DavResource : IDavResourceProperties {
 
 		/// Add the properties by status
 		foreach(code; result.keys) {
-			auto propStat = new DavProp;
-			propStat.parent = item;
-			propStat.name = "d:propstat";
-			propStat["d:prop"] = "";
+			if(code == 200) {
+				auto propStat = new DavProp;
+				propStat.parent = item;
+				propStat.name = "d:propstat";
+				propStat["d:prop"] = "";
 
-			foreach(p; result[code]) {
-				propStat["d:prop"].addChild(p);
+				foreach(p; result[code]) {
+					propStat["d:prop"].addChild(p);
+				}
+
+				propStat["d:status"] = `HTTP/1.1 ` ~ code.to!string ~ ` ` ~ httpStatusText(code);
+				item.addChild(propStat);
 			}
-
-			propStat["d:status"] = `HTTP/1.1 ` ~ code.to!string ~ ` ` ~ httpStatusText(code);
-			item.addChild(propStat);
 		}
 
 		item["d:status"] = `HTTP/1.1 200 OK`;
@@ -416,6 +492,9 @@ class DavResource : IDavResourceProperties {
 		DavResource[] getChildren(ulong depth = 1);
 		void setContent(const ubyte[] content);
 		void setContent(InputStream content, ulong size);
-		@property InputStream stream();
+		@property {
+			InputStream stream();
+			bool isCollection();
+		}
 	}
 }

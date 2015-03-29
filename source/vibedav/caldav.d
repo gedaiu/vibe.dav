@@ -43,7 +43,8 @@ interface ICalendarCollectionProperties {
 		string[] supportedCalendarComponentSet();
 
 		@ResourceProperty("supported-calendar-data", "urn:ietf:params:xml:ns:caldav")
-		string[] supportedCalendarData();
+		@ResourcePropertyTagAttributes("calendar-data", "urn:ietf:params:xml:ns:caldav")
+		string[string][] supportedCalendarData();
 
 		@ResourceProperty("max-resource-size", "urn:ietf:params:xml:ns:caldav")
 		ulong maxResourceSize();
@@ -62,7 +63,7 @@ interface ICalendarCollectionProperties {
 	}
 }
 
-class DavCalendarBaseResource : DavResource, ICalendarCollectionProperties {
+class DavCalendarBaseResource : DavResource, ICalendarCollectionProperties, IDavResourceExtendedProperties {
 	protected IDav dav;
 
 	this(IDav dav, URL url) {
@@ -105,12 +106,13 @@ class DavFileCalendarResource : DavCalendarBaseResource {
 		href = path.toString;
 	}
 
-
 	override {
 		DavProp property(string key) {
+			if(hasDavInterfaceProperty!ICalendarCollectionProperties(key))
+				return getDavInterfaceProperty!ICalendarCollectionProperties(key, this);
 
-			if(hasDavInterfaceProperties!ICalendarCollectionProperties(key))
-				return getDavInterfaceProperties!ICalendarCollectionProperties(key, this);
+			if(hasDavInterfaceProperty!IDavResourceExtendedProperties(key))
+				return getDavInterfaceProperty!IDavResourceExtendedProperties(key, this);
 
 			return super.property(key);
 		}
@@ -120,7 +122,7 @@ class DavFileCalendarResource : DavCalendarBaseResource {
 
 			string listPath = nativePath.decode;
 
-			return getFolderContent!DavFileCalendarResource(listPath, url, dav, depth);
+			return getFolderContent!(DavFileCalendarResource, "*.ics")(listPath, url, dav, depth);
 		}
 
 		void setContent(const ubyte[] content) {
@@ -184,7 +186,11 @@ class DavFileCalendarResource : DavCalendarBaseResource {
 			return nativePath.contentLength;
 		}
 
-		bool isCollection() {
+		string[] resourceType() {
+			return ["collection:DAV:", "calendar:urn:ietf:params:xml:ns:caldav"];
+		}
+
+		override bool isCollection() {
 			return nativePath.isDir;
 		}
 
@@ -202,12 +208,13 @@ class DavFileCalendarResource : DavCalendarBaseResource {
 		}
 
 		string[] supportedCalendarComponentSet() {
-			string[] list;
-			return list;
+			return ["VEVENT", "VTODO", "VJOURNAL", "VFREEBUSY", "VTIMEZONE", "VALARM"];
 		}
 
-		string[] supportedCalendarData() {
-			string[] list;
+		string[string][] supportedCalendarData() {
+			string[string][] list;
+
+			list ~= [["content-type": "text/calendar", "version": "2.0"]];
 
 			return list;
 		}
@@ -230,6 +237,17 @@ class DavFileCalendarResource : DavCalendarBaseResource {
 
 		ulong maxAttendeesPerInstance() {
 			return ulong.max;
+		}
+
+		string[] addMember() {
+			return [href];
+		}
+
+		string owner() {
+			if(user is null)
+				return "";
+
+			return user.principalURL;
 		}
 	}
 }

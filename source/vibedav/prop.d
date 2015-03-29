@@ -80,11 +80,7 @@ class DavProp {
 	/// A key is a tag name glued with a `:` and the namespace
 	static {
 		DavProp FromKeyAndList(string key, string[][string] values) {
-			auto pos = key.indexOf(":");
-			auto name = key[0..pos];
-			auto ns = key[pos+1..$];
-
-			DavProp p = new DavProp(ns, name, "");
+			DavProp p = FromKey(key, "");
 
 			foreach(nsName, nsList; values)
 				foreach(value; nsList) {

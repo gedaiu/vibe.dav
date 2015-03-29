@@ -74,12 +74,12 @@ FileStream toStream(string path) {
 	return openFile(path);
 }
 
-DavResource[] getFolderContent(T)(string path, URL url, DavFs!T dav, ulong depth = 1) {
+DavResource[] getFolderContent(T, string format = "*")(string path, URL url, DavFs!T dav, ulong depth = 1) {
 	DavResource[] list;
 
 	if(depth == 0) return list;
 
-	auto fileList = dirEntries(path, "*", SpanMode.shallow);
+	auto fileList = dirEntries(path, format, SpanMode.shallow);
 
 	foreach(file; fileList) {
 		string fileName = baseName(file.name);
@@ -146,7 +146,11 @@ class DavFileResource : DavResource {
 			return nativePath.contentLength;
 		}
 
-		bool isCollection() {
+		string[] resourceType() {
+			return ["collection:DAV:"];
+		}
+
+		override bool isCollection() {
 			return nativePath.isDir;
 		}
 
@@ -277,8 +281,8 @@ class DavFs(T) : Dav {
 	}
 }
 
-void serveDavFs(T)(URLRouter router, string rootUrl, string rootPath, IDavUserCollection userCollection) {
-	auto fileDav = new DavFs!T(rootUrl, rootPath);
+void serveDavFs(T, U)(URLRouter router, string rootUrl, string rootPath, IDavUserCollection userCollection) {
+	auto fileDav = new DavFs!(T, U)(rootUrl, rootPath);
 	fileDav.userCollection = userCollection;
 	router.any(rootUrl ~ "*", serveDav(fileDav));
 }

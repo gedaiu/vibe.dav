@@ -214,3 +214,72 @@ class DavFileResource : DavResource {
 		}
 	}
 }
+
+
+/// File dav impplementation
+class DavFs(T) : Dav {
+	protected {
+		Path _rootFile;
+	}
+
+	this() {
+		this("","");
+	}
+
+	this(string rootUrl, string _rootFile) {
+		super(rootUrl);
+		this._rootFile = Path(_rootFile);
+	}
+
+	Path filePath(URL url) {
+		return _rootFile ~ url.path.toString[rootUrl.toString.length..$];
+	}
+
+	DavResource getResource(URL url) {
+		auto filePath = filePath(url);
+
+		if(!filePath.toString.exists)
+			throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
+
+		return new T(this, url);
+	}
+
+	DavResource createCollection(URL url) {
+		auto filePath = filePath(url);
+
+		if(filePath.toString.exists)
+			throw new DavException(HTTPStatus.methodNotAllowed, "plain/text");
+
+		mkdir(filePath.toString);
+		return new T(this, url);
+	}
+
+	DavResource createProperty(URL url) {
+		auto filePath = filePath(url);
+		auto strFilePath = filePath.toString;
+
+		if(strFilePath.exists)
+			throw new DavException(HTTPStatus.methodNotAllowed, "plain/text");
+
+		if(filePath.endsWithSlash) {
+			strFilePath.mkdirRecurse;
+		} else {
+			auto f = new File(strFilePath, "w");
+			f.close;
+		}
+
+		return new T(this, url);
+	}
+
+	@property
+	Path rootFile() {
+		return _rootFile;
+	}
+}
+
+void serveDavFs(T)(URLRouter router, string rootUrl, string rootPath, IDavUserCollection userCollection) {
+	auto fileDav = new DavFs!T(rootUrl, rootPath);
+	fileDav.userCollection = userCollection;
+	router.any(rootUrl ~ "*", serveDav(fileDav));
+}
+

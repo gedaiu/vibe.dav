@@ -35,6 +35,60 @@ import std.uri;
 import tested;
 
 
+struct ResourcePropertyValue {
+	enum Mode {
+		none,
+		attribute,
+		resourceType
+	}
+
+	string name;
+	string ns;
+	string attr;
+	Mode mode;
+
+	DavProp create(string val) {
+		if(mode == Mode.attribute)
+			return createAttribute(val);
+
+		if(mode == Mode.resourceType)
+			return createResourceType(val);
+
+		return new DavProp(val);
+	}
+
+	DavProp createAttribute(string val) {
+		DavProp p = new DavProp(name, ns);
+		p.attribute[name] = val;
+
+		return p;
+	}
+
+	DavProp createResourceType(string val) {
+		if(val == "false")
+			return new DavProp("");
+		else
+			return new DavProp("DAV:", "collection");
+	}
+}
+
+ResourcePropertyValue ResourcePropertyValueAttr(string name, string ns, string attr) {
+	ResourcePropertyValue v;
+	v.name = name;
+	v.ns = ns;
+	v.attr = attr;
+	v.mode = ResourcePropertyValue.Mode.attribute;
+
+	return v;
+}
+
+ResourcePropertyValue ResourcePropertyResourceType() {
+	ResourcePropertyValue v;
+	v.mode = ResourcePropertyValue.Mode.resourceType;
+
+	return v;
+}
+
 struct ResourceProperty {
 	string name;
 	string ns;
@@ -46,9 +100,19 @@ ResourceProperty getResourceProperty(T...)() {
 	else static if( is(typeof(T[0]) == ResourceProperty) )
 		return T[0];
 	else
-		return getResourceProperty(T[1..$]);
+		return getResourceProperty!(T[1..$]);
 }
 
+ResourcePropertyValue getResourceTagProperty(T...)() {
+	static if(T.length == 0) {
+		ResourcePropertyValue v;
+		return v;
+	}
+	else static if( is(typeof(T[0]) == ResourcePropertyValue) )
+		return T[0];
+	else
+		return getResourceTagProperty!(T[1..$]);
+}
 
 pure bool hasDavInterfaceProperties(I)(string key) {
 	bool result = false;
@@ -70,21 +134,30 @@ pure bool hasDavInterfaceProperties(I)(string key) {
 	return result;
 }
 
-DavProp propFrom(T)(string name, string ns, T value) {
+DavProp propFrom(T, U)(string name, string ns, T value, U tagVal) {
 	string v;
 
-	static if( is(T == string) )
+	auto p = new DavProp(ns, name);
+
+	static if( is(T == SysTime) )
 	{
-		return new DavProp(name, ns, value);
+		auto elm = tagVal.create(toRFC822DateTimeString(value));
+		p.addChild(elm);
 	}
-	else static if( is(T == SysTime) )
+	else static if( is(T == string[]) )
 	{
-		return new DavProp(name, ns, toRFC822DateTimeString(value));
+		foreach(item; value) {
+			auto tag = tagVal.create(item);
+			p.addChild(tag);
+		}
 	}
 	else
 	{
-		return new DavProp(name, ns, value.to!string);
+		auto elm = tagVal.create(value.to!string);
+		p.addChild(elm);
 	}
+
+	return p;
 }
 
 DavProp getDavInterfaceProperties(I)(string key, I davInterface) {
@@ -93,12 +166,13 @@ DavProp getDavInterfaceProperties(I)(string key, I davInterface) {
 	void getProp(T...)() {
 		static if(T.length > 0) {
 			enum val = getResourceProperty!(__traits(getAttributes, __traits(getMember, I, T[0])));
+			enum tagVal = getResourceTagProperty!(__traits(getAttributes, __traits(getMember, I, T[0])));
 			enum staticKey = val.name ~ ":" ~ val.ns;
 
 			if(staticKey == key) {
 				auto value = __traits(getMember, davInterface, T[0]);
 				pragma(msg, "\n", T[0], " ", typeof(value));
-				result = propFrom(val.name, val.ns, value);
+				result = propFrom(val.name, val.ns, value, tagVal);
 			}
 
 			getProp!(T[1..$])();
@@ -163,6 +237,7 @@ interface IDavResourceProperties {
 		ulong contentLength();
 
 		@ResourceProperty("resourcetype", "DAV:")
+		@ResourcePropertyResourceType()
 		bool isCollection();
 	}
 }
@@ -283,8 +358,9 @@ class DavResource : IDavResourceProperties {
 			propStat.name = "d:propstat";
 			propStat["d:prop"] = "";
 
-			foreach(p; result[code])
+			foreach(p; result[code]) {
 				propStat["d:prop"].addChild(p);
+			}
 
 			propStat["d:status"] = `HTTP/1.1 ` ~ code.to!string ~ ` ` ~ httpStatusText(code);
 			item.addChild(propStat);
@@ -461,11 +537,26 @@ abstract class Dav : DavBase {
 	}
 
 	private {
+
+		bool[string] defaultPropList() {
+			bool[string] list;
+
+			list["creationdate:DAV:"] = true;
+            list["displayname:DAV:"] = true;
+            list["getcontentlength:DAV:"] = true;
+            list["getcontenttype:DAV:"] = true;
+            list["getetag:DAV:"] = true;
+            list["lastmodified:DAV:"] = true;
+            list["resourcetype:DAV:"] = true;
+
+			return list;
+		}
+
 		bool[string] propList(DavProp document) {
 			bool[string] list;
 
-			if(document is null)
-				return list;
+			if(document is null || "allprop" in document["propfind"])
+				return defaultPropList;
 
 			auto properties = document["propfind"]["prop"];
 
@@ -494,12 +585,9 @@ abstract class Dav : DavBase {
 
 	void propfind(DavRequest request, DavResponse response) {
 		bool[string] requestedProperties = propList(request.content);
-
 		DavResource[] list;
 
-		writeln("1. selectedResource ", request.url);
 		auto selectedResource = getResource(request.url);
-		writeln("2. selectedResource ", selectedResource);
 		selectedResource.user = userCollection.GetDavUser(request.username);
 
 		list ~= selectedResource;
@@ -742,67 +830,8 @@ abstract class Dav : DavBase {
 	}
 }
 
-/// File dav impplementation
-class DavFs(T) : Dav {
-	protected {
-		Path _rootFile;
-	}
 
-	this() {
-		this("","");
-	}
-
-	this(string rootUrl, string _rootFile) {
-		super(rootUrl);
-		this._rootFile = Path(_rootFile);
-	}
-
-	Path filePath(URL url) {
-		return _rootFile ~ url.path.toString[rootUrl.toString.length..$];
-	}
-
-	DavResource getResource(URL url) {
-		auto filePath = filePath(url);
-
-		if(!filePath.toString.exists)
-			throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
-
-		return new T(this, url);
-	}
-
-	DavResource createCollection(URL url) {
-		auto filePath = filePath(url);
-
-		if(filePath.toString.exists)
-			throw new DavException(HTTPStatus.methodNotAllowed, "plain/text");
-
-		mkdir(filePath.toString);
-		return new T(this, url);
-	}
-
-	DavResource createProperty(URL url) {
-		auto filePath = filePath(url);
-		auto strFilePath = filePath.toString;
-
-		if(strFilePath.exists)
-			throw new DavException(HTTPStatus.methodNotAllowed, "plain/text");
-
-		if(filePath.endsWithSlash) {
-			strFilePath.mkdirRecurse;
-		} else {
-			auto f = new File(strFilePath, "w");
-			f.close;
-		}
-
-		return new T(this, url);
-	}
-
-	@property
-	Path rootFile() {
-		return _rootFile;
-	}
-}
-
+/// Hook vibe.d requests to the right DAV method
 HTTPServerRequestDelegate serveDav(T : Dav)(T dav) {
 	void callback(HTTPServerRequest req, HTTPServerResponse res)
 	{
@@ -812,7 +841,7 @@ HTTPServerRequestDelegate serveDav(T : Dav)(T dav) {
 
 				writeln("==========================================================");
 				writeln(req.fullURL);
-				writeln("Method: ", req.method);
+				writeln("Method: ", req.method, "\n");
 
 				foreach(key, val; req.headers)
 					writeln(key, ": ", val);
@@ -857,15 +886,9 @@ HTTPServerRequestDelegate serveDav(T : Dav)(T dav) {
 		}
 
 		debug {
-			writeln("SUCCESS:", res.statusCode.to!int, "(", res.statusCode, ")");
+			writeln("\nSUCCESS:", res.statusCode.to!int, "(", res.statusCode, ")");
 		}
 	}
 
 	return &callback;
-}
-
-void serveDavFs(T)(URLRouter router, string rootUrl, string rootPath, IDavUserCollection userCollection) {
-	auto fileDav = new DavFs!T(rootUrl, rootPath);
-	fileDav.userCollection = userCollection;
-	router.any(rootUrl ~ "*", serveDav(fileDav));
 }

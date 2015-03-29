@@ -36,7 +36,6 @@ import tested;
 
 
 class DavPropException : DavException {
-
 	///
 	this(HTTPStatus status, string msg, string mime = "plain/text", string file = __FILE__, size_t line = __LINE__, Throwable next = null)
 	{
@@ -60,11 +59,16 @@ class DavProp {
 	string name;
 	string value;
 	string namespaceAttr = _NULL_NS;
+	string[string] attribute;
 
 	this(string namespaceAttr, string name, string value) {
 		this(value);
 		this.namespaceAttr = namespaceAttr;
 		this.name = name;
+	}
+
+	this(string namespaceAttr, string name) {
+		this(namespaceAttr, name, "");
 	}
 
 	this(string value) {
@@ -125,6 +129,16 @@ class DavProp {
 			return ns;
 		}
 
+		string getAttributes() inout {
+			string ns;
+
+			if(attribute.length > 0)
+				foreach(string key, string value; attribute)
+					ns ~= ` ` ~ key ~ `="` ~ value ~ `"`;
+
+			return ns;
+		}
+
 		string getTagText() {
 			if(namespaceAttr != _NULL_NS && prefix == "") {
 				auto p = getPrefixForNamespace(namespaceAttr);
@@ -134,7 +148,7 @@ class DavProp {
 				}
 			}
 
-			return name ~ getNamespaceAttributes;
+			return name ~ getAttributes ~ getNamespaceAttributes;
 		}
 	}
 
@@ -541,6 +555,15 @@ unittest {
 	assert(p.toString == `<A xmlns="DAV:"><href xmlns="DAV:">value</href></A>`);
 }
 
+@name("attributes to string")
+unittest {
+	auto p = new DavProp("DAV:", "A");
+	p.attribute["name"] = "value";
+
+	assert(p.toString == `<A name="value" xmlns="DAV:"/>`);
+}
+
+
 string normalize(const string text) {
 	bool isWs(const char ch) {
 		if(ch == ' ' || ch == '\n' || ch == '\r' || ch == '\t')
@@ -767,7 +790,6 @@ DavProp parseXMLPropNode(string xmlNodeText, DavProp parent, ref ulong end) {
 
 	if(tagPieces[0] == "?xml")
 		isSelfClosed = true;
-
 	node.name = tagPieces[0];
 
 	//get the tag content

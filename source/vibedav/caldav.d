@@ -39,6 +39,7 @@ interface ICalendarCollectionProperties {
 		TimeZone calendarTimezone();
 
 		@ResourceProperty("supported-calendar-component-set", "urn:ietf:params:xml:ns:caldav")
+		@ResourcePropertyValueAttr("comp", "urn:ietf:params:xml:ns:caldav", "name")
 		string[] supportedCalendarComponentSet();
 
 		@ResourceProperty("supported-calendar-data", "urn:ietf:params:xml:ns:caldav")

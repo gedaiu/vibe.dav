@@ -6,7 +6,7 @@
  */
 module vibedav.filedav;
 
-public import vibedav.base;
+import vibedav.base;
 
 import vibe.core.log;
 import vibe.core.file;
@@ -282,4 +282,3 @@ void serveDavFs(T)(URLRouter router, string rootUrl, string rootPath, IDavUserCo
 	fileDav.userCollection = userCollection;
 	router.any(rootUrl ~ "*", serveDav(fileDav));
 }
-

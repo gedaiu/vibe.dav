@@ -14,11 +14,11 @@ interface IDavUser {
 			/// rfc5397 - 3
 			string currentUserPrincipal();
 
-		    /// rfc3744 - 4.2
-		    string principalURL();
+			/// rfc3744 - 4.2
+			string principalURL();
 
 			/// rfc3744 - 5.8
-		    string[] principalCollectionSet();
+			string[] principalCollectionSet();
 		}
 
 		/// Helper to get property name
@@ -50,5 +50,3 @@ interface ICalDavUser : IDavUser {
 interface IDavUserCollection {
 	pure IDavUser GetDavUser(string name);
 }
-
-

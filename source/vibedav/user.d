@@ -27,7 +27,6 @@ interface IDavBaseUser {
 	pure {
 		@property {
 			/// rfc5397 - 3
-
 			@ResourceProperty("current-user-principal", "DAV:")
 			@ResourcePropertyTagText("href", "DAV:")
 			string currentUserPrincipal();

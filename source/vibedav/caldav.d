@@ -81,7 +81,7 @@ class DavCalendarBaseResource : DavResource, ICalendarCollectionProperties, IDav
 
 /// Represents a file or directory DAV resource. NS=urn:ietf:params:xml:ns:caldav
 class DavFileCalendarResource : DavCalendarBaseResource {
-	alias DavFsType = DavFs!DavFileCalendarResource;
+	alias DavFsType = DavFs!(DavFileCalendarResource, DavFileCalendarResource);
 
 	protected {
 		immutable Path filePath;
@@ -122,7 +122,7 @@ class DavFileCalendarResource : DavCalendarBaseResource {
 
 			string listPath = nativePath.decode;
 
-			return getFolderContent!(DavFileCalendarResource, "*.ics")(listPath, url, dav, depth);
+			return getFolderContent!(DavFileCalendarResource, DavFileCalendarResource, "*.ics")(listPath, url, dav, depth);
 		}
 
 		void setContent(const ubyte[] content) {

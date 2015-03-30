@@ -74,7 +74,7 @@ FileStream toStream(string path) {
 	return openFile(path);
 }
 
-DavResource[] getFolderContent(T, string format = "*")(string path, URL url, DavFs!T dav, ulong depth = 1) {
+DavResource[] getFolderContent(TResource, TCollection, string format = "*")(string path, URL url, DavFs!(TResource, TCollection) dav, ulong depth = 1) {
 	DavResource[] list;
 
 	if(depth == 0) return list;
@@ -82,25 +82,34 @@ DavResource[] getFolderContent(T, string format = "*")(string path, URL url, Dav
 	auto fileList = dirEntries(path, format, SpanMode.shallow);
 
 	foreach(file; fileList) {
+		writeln("=> ", file);
 		string fileName = baseName(file.name);
 
 		URL childUrl = url;
 		childUrl.path = childUrl.path ~ fileName;
 
-   		auto resource = new T(dav, childUrl);
+		DavResource resource;
 
-   		list ~= resource;
+		if(file.isDir) {
+			writeln("collection");
+			resource = new TCollection(dav, childUrl);
 
-   		if(resource.isCollection && depth > 0)
-   			list ~= resource.getChildren(depth - 1);
+			if(depth > 0)
+				list ~= resource.getChildren(depth - 1);
+		}
+		else {
+			writeln("resource");
+			resource = new TResource(dav, childUrl);
+		}
+
+		list ~= resource;
 	}
 
 	return list;
 }
 
-/// Represents a file or directory DAV resource
-class DavFileResource : DavResource {
-	alias DavFsType = DavFs!DavFileResource;
+
+abstract class DavFileBase(DavFsType) : DavResource {
 
 	protected {
 		immutable Path filePath;
@@ -130,10 +139,6 @@ class DavFileResource : DavResource {
 			return nativePath.eTag;
 		}
 
-		string contentType() {
-			return getMimeTypeForFile(nativePath);
-		}
-
 		SysTime creationDate() {
 			return nativePath.creationDate;
 		}
@@ -158,27 +163,65 @@ class DavFileResource : DavResource {
 			return nativePath.toStream;
 		}
 	}
+}
+
+alias DavFsFileType = DavFs!(DavFileResource, DavFileCollection);
+
+/// Represents a Folder DAV resource
+class DavFileCollection : DavFileBase!DavFsFileType {
+
+	this(DavFsFileType dav, URL url) {
+		super(dav, url);
+
+		if(!nativePath.isDir)
+			throw new DavException(HTTPStatus.internalServerError, nativePath ~ ": Path must be a folder.");
+	}
 
 	override DavResource[] getChildren(ulong depth = 1) {
-		DavResource[] list;
-
-		string listPath = nativePath.decode;
-
-		return getFolderContent(listPath, url, dav, depth);
+		return getFolderContent(nativePath, url, dav, depth);
 	}
 
 	override void remove() {
 		super.remove;
 
-		if(isCollection) {
-			auto childList = getChildren;
+		foreach(c; getChildren)
+			c.remove;
 
-			foreach(c; childList)
-				c.remove;
+		nativePath.rmdir;
+	}
 
-			nativePath.rmdir;
-		} else
-			nativePath.remove;
+	void setContent(const ubyte[] content) {
+		throw new DavException(HTTPStatus.conflict, "Can't set folder content.");
+	}
+
+	void setContent(InputStream content, ulong size) {
+		throw new DavException(HTTPStatus.conflict, "Can't set folder content.");
+	}
+
+
+	string contentType() {
+		// https://tools.ietf.org/html/rfc2425
+		return "text/directory";
+	}
+}
+
+/// Represents a file DAV resource
+class DavFileResource : DavFileBase!DavFsFileType {
+
+	this(DavFsFileType dav, URL url) {
+		super(dav, url);
+
+		if(nativePath.isDir)
+			throw new DavException(HTTPStatus.internalServerError, nativePath ~ ": Path must be a file.");
+	}
+
+	override DavResource[] getChildren(ulong depth = 0) {
+		return getFolderContent(nativePath, url, dav, depth);
+	}
+
+	override void remove() {
+		super.remove;
+		nativePath.remove;
 	}
 
 	@testName("exists")
@@ -198,9 +241,6 @@ class DavFileResource : DavResource {
 		}
 
 		void setContent(InputStream content, ulong size) {
-			if(nativePath.isDir)
-				throw new DavException(HTTPStatus.conflict, "");
-
 			auto tmpPath = filePath.to!string ~ ".tmp";
 			auto tmpFile = File(tmpPath, "w");
 
@@ -217,11 +257,15 @@ class DavFileResource : DavResource {
 			std.file.remove(tmpPath);
 		}
 	}
+
+	string contentType() {
+		return getMimeTypeForFile(nativePath);
+	}
 }
 
 
 /// File dav impplementation
-class DavFs(T) : Dav {
+class DavFs(TResource, TCollection) : Dav {
 	protected {
 		Path _rootFile;
 	}
@@ -245,17 +289,27 @@ class DavFs(T) : Dav {
 		if(!filePath.toString.exists)
 			throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
 
-		return new T(this, url);
+
+		writeln(filePath.toString, "= ", filePath.toString.isDir);
+
+		if(filePath.toString.isDir) {
+			writeln("colection");
+			return new TCollection(this, url);
+		}
+		else {
+			writeln("resource");
+			return new TResource(this, url);
+		}
 	}
 
 	DavResource createCollection(URL url) {
 		auto filePath = filePath(url);
 
 		if(filePath.toString.exists)
-			throw new DavException(HTTPStatus.methodNotAllowed, "plain/text");
+			throw new DavException(HTTPStatus.methodNotAllowed, "Colection already exists.");
 
 		mkdir(filePath.toString);
-		return new T(this, url);
+		return new TCollection(this, url);
 	}
 
 	DavResource createProperty(URL url) {
@@ -263,7 +317,7 @@ class DavFs(T) : Dav {
 		auto strFilePath = filePath.toString;
 
 		if(strFilePath.exists)
-			throw new DavException(HTTPStatus.methodNotAllowed, "plain/text");
+			throw new DavException(HTTPStatus.methodNotAllowed, "Property already exists.");
 
 		if(filePath.endsWithSlash) {
 			strFilePath.mkdirRecurse;
@@ -272,7 +326,7 @@ class DavFs(T) : Dav {
 			f.close;
 		}
 
-		return new T(this, url);
+		return new TResource(this, url);
 	}
 
 	@property

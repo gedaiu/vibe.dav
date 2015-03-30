@@ -388,19 +388,17 @@ class DavResource : IDavResourceProperties {
 
 		/// Add the properties by status
 		foreach(code; result.keys) {
-			if(code == 200) {
-				auto propStat = new DavProp;
-				propStat.parent = item;
-				propStat.name = "d:propstat";
-				propStat["d:prop"] = "";
+			auto propStat = new DavProp;
+			propStat.parent = item;
+			propStat.name = "d:propstat";
+			propStat["d:prop"] = "";
 
-				foreach(p; result[code]) {
-					propStat["d:prop"].addChild(p);
-				}
-
-				propStat["d:status"] = `HTTP/1.1 ` ~ code.to!string ~ ` ` ~ httpStatusText(code);
-				item.addChild(propStat);
+			foreach(p; result[code]) {
+				propStat["d:prop"].addChild(p);
 			}
+
+			propStat["d:status"] = `HTTP/1.1 ` ~ code.to!string ~ ` ` ~ httpStatusText(code);
+			item.addChild(propStat);
 		}
 
 		item["d:status"] = `HTTP/1.1 200 OK`;

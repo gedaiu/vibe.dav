@@ -170,7 +170,6 @@ DavProp propFrom(T, U)(string name, string ns, T value, U tagVal) {
 	string v;
 
 	auto p = new DavProp(ns, name);
-	writeln(p);
 
 	static if( is(T == SysTime) )
 	{
@@ -181,15 +180,11 @@ DavProp propFrom(T, U)(string name, string ns, T value, U tagVal) {
 	{
 		foreach(item; value) {
 			auto tag = tagVal.create(item);
-			writeln("propFrom 3 ", tag);
 			try
 				p.addChild(tag);
 			catch(Exception e)
 				writeln(e);
-
-			writeln("propFrom 4");
 		}
-		writeln("propFrom 5");
 	}
 	else static if( is(T == string[][string]) )
 	{
@@ -217,13 +212,8 @@ DavProp getDavInterfaceProperty(I)(string key, I davInterface) {
 			enum staticKey = val.name ~ ":" ~ val.ns;
 
 			if(staticKey == key) {
-				writeln("getProp 1 ", key);
 				auto value = __traits(getMember, davInterface, T[0]);
-				writeln("getProp 2 ");
-				pragma(msg, T[0], " ", typeof(value));
-				writeln("getProp 3 ");
 				result = propFrom(val.name, val.ns, value, tagVal);
-				writeln("getProp 4 ");
 			}
 
 			getProp!(T[1..$])();
@@ -315,6 +305,10 @@ class DavResource : IDavResourceProperties {
 		string[] extraSupport() {
 			string[] headers;
 			return headers;
+		}
+
+		nothrow pure string type() {
+			return "DavResource";
 		}
 	}
 
@@ -409,8 +403,7 @@ class DavResource : IDavResourceProperties {
 	bool hasChild(Path path) {
 		auto childList = getChildren;
 
-		foreach(c; childList)
-			if(c.href == path.to!string)
+		if(path.to!string in childList)
 				return true;
 
 		return false;
@@ -487,7 +480,7 @@ class DavResource : IDavResourceProperties {
 	}
 
 	abstract {
-		DavResource[] getChildren(ulong depth = 1);
+		bool[string] getChildren();
 		void setContent(const ubyte[] content);
 		void setContent(InputStream content, ulong size);
 		@property {

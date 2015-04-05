@@ -1,7 +1,7 @@
 /**
  * Authors: Szabo Bogdan <szabobogdan@yahoo.com>
  * Date: 2 15, 2015
- * License: Subject to the	 terms of the MIT license, as written in the included LICENSE.txt file.
+ * License: Subject to the terms of the MIT license, as written in the included LICENSE.txt file.
  * Copyright: Public Domain
  */
 module vibedav.base;
@@ -35,7 +35,6 @@ import std.typecons;
 import std.uri;
 import tested;
 
-
 class DavStorage {
 	static {
 		DavLockList locks;
@@ -66,8 +65,9 @@ class DavException : Exception {
 
 interface IDav {
 	DavResource getResource(URL url);
+	DavResource[] getResources(URL url, ulong depth, IDavUser user);
 	DavResource createCollection(URL url);
-	DavResource createProperty(URL url);
+	DavResource createResource(URL url);
 
 	void options(DavRequest request, DavResponse response);
 	void propfind(DavRequest request, DavResponse response);
@@ -84,8 +84,12 @@ interface IDav {
 	Path rootUrl();
 }
 
+
+/// The main DAV protocol implementation
 abstract class DavBase : IDav {
 	protected Path _rootUrl;
+
+	IDavUserCollection userCollection;
 
 	@property
 	Path rootUrl() {
@@ -106,7 +110,7 @@ abstract class DavBase : IDav {
 				resource = getResource(url);
 				status = HTTPStatus.ok;
 			} else {
-				resource = createProperty(url);
+				resource = createResource(url);
 				status = HTTPStatus.created;
 			}
 
@@ -131,15 +135,6 @@ abstract class DavBase : IDav {
 			return path;
 		}
 	}
-}
-
-/// The main DAV protocol implementation
-abstract class Dav : DavBase {
-	IDavUserCollection userCollection;
-
-	this(string rootUrl) {
-		super(rootUrl);
-	}
 
 	private {
 
@@ -147,12 +142,12 @@ abstract class Dav : DavBase {
 			bool[string] list;
 
 			list["creationdate:DAV:"] = true;
-            list["displayname:DAV:"] = true;
-            list["getcontentlength:DAV:"] = true;
-            list["getcontenttype:DAV:"] = true;
-            list["getetag:DAV:"] = true;
-            list["lastmodified:DAV:"] = true;
-            list["resourcetype:DAV:"] = true;
+			list["displayname:DAV:"] = true;
+			list["getcontentlength:DAV:"] = true;
+			list["getcontenttype:DAV:"] = true;
+			list["getetag:DAV:"] = true;
+			list["lastmodified:DAV:"] = true;
+			list["resourcetype:DAV:"] = true;
 
 			return list;
 		}
@@ -191,15 +186,15 @@ abstract class Dav : DavBase {
 	void propfind(DavRequest request, DavResponse response) {
 		bool[string] requestedProperties = propList(request.content);
 		DavResource[] list;
+		IDavUser user;
 
-		auto selectedResource = getResource(request.url);
-		selectedResource.user = userCollection.GetDavUser(request.username);
+		if(userCollection)
+			user = userCollection.GetDavUser(request.username);
 
-		list ~= selectedResource;
-		if(selectedResource.isCollection)
-			list ~= selectedResource.getChildren(request.depth);
+		list = getResources(request.url, request.depth, user);
 
 		response.setPropContent(list, requestedProperties);
+
 		response.flush;
 	}
 
@@ -363,19 +358,28 @@ abstract class Dav : DavBase {
 	}
 
 	void copy(DavRequest request, DavResponse response) {
+		IDavUser user;
+
+		if(request.username !is null)
+			user = userCollection.GetDavUser(request.username);
 
 		URL getDestinationUrl(DavResource source) {
+			auto sourceUrl = source.url;
+			sourceUrl.host = request.url.host;
+			sourceUrl.schema = request.url.schema;
+			sourceUrl.port = request.url.port;
+
 			string strSrcUrl = request.url.toString;
 			string strDestUrl = request.destination.toString;
 
-			return URL(strDestUrl ~ source.url.toString[strSrcUrl.length..$]);
+			return URL(strDestUrl ~ sourceUrl.toString[strSrcUrl.length..$]);
 		}
 
 		void localCopy(DavResource source, DavResource destination) {
 			source.copy(destination.url);
 
 			if(source.isCollection) {
-				auto list = source.getChildren(DavDepth.infinity);
+				auto list = getResources(request.url, DavDepth.infinity, user);
 
 				foreach(child; list) {
 					auto destinationUrl = getDestinationUrl(child);
@@ -426,7 +430,7 @@ abstract class Dav : DavBase {
 			if(source.isCollection)
 				destination = createCollection(destinationUrl);
 			else
-				destination = createProperty(destinationUrl);
+				destination = createResource(destinationUrl);
 		}
 
 		localCopy(source, destination);
@@ -435,9 +439,8 @@ abstract class Dav : DavBase {
 	}
 }
 
-
 /// Hook vibe.d requests to the right DAV method
-HTTPServerRequestDelegate serveDav(T : Dav)(T dav) {
+HTTPServerRequestDelegate serveDav(T : IDav)(T dav) {
 	void callback(HTTPServerRequest req, HTTPServerResponse res)
 	{
 		try {

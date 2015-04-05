@@ -66,7 +66,7 @@ interface ICalendarCollectionProperties {
 class DavCalendarBaseResource : DavResource, ICalendarCollectionProperties, IDavResourceExtendedProperties {
 	protected IDav dav;
 
-	this(IDav dav, URL url) {
+	this(IDav dav, URL url, bool forceCreate = false) {
 		super(dav, url);
 		this.dav = dav;
 	}
@@ -75,127 +75,6 @@ class DavCalendarBaseResource : DavResource, ICalendarCollectionProperties, IDav
 		override string[] extraSupport() {
 			string[] headers = ["access-control", "calendar-access"];
 			return headers;
-		}
-	}
-}
-
-/// Represents a file or directory DAV resource. NS=urn:ietf:params:xml:ns:caldav
-class DavFileCalendarResource : DavCalendarBaseResource {
-	alias DavFsType = DavFs!(DavFileCalendarResource, DavFileCalendarResource);
-
-	protected {
-		immutable Path filePath;
-		immutable string nativePath;
-		DavFsType dav;
-	}
-
-	this(DavFsType dav, URL url) {
-		super(dav, url);
-
-		this.dav = dav;
-		auto path = url.path;
-
-		path.normalize;
-
-		filePath = dav.filePath(url);
-		nativePath = filePath.toNativeString();
-
-		if(!nativePath.exists)
-			throw new DavException(HTTPStatus.notFound, "File not found.");
-
-		href = path.toString;
-	}
-
-	override {
-		DavProp property(string key) {
-			if(hasDavInterfaceProperty!ICalendarCollectionProperties(key))
-				return getDavInterfaceProperty!ICalendarCollectionProperties(key, this);
-
-			if(hasDavInterfaceProperty!IDavResourceExtendedProperties(key))
-				return getDavInterfaceProperty!IDavResourceExtendedProperties(key, this);
-
-			return super.property(key);
-		}
-
-		DavResource[] getChildren(ulong depth = 1) {
-			DavResource[] list;
-
-			string listPath = nativePath.decode;
-
-			return getFolderContent!(DavFileCalendarResource, DavFileCalendarResource, "*.ics")(listPath, url, dav, depth);
-		}
-
-		void setContent(const ubyte[] content) {
-			std.stdio.write(nativePath, content);
-		}
-
-		void setContent(InputStream content, ulong size) {
-			if(nativePath.isDir)
-				throw new DavException(HTTPStatus.conflict, "");
-
-			auto tmpPath = filePath.to!string ~ ".tmp";
-			auto tmpFile = File(tmpPath, "w");
-
-			while(!content.empty) {
-				auto leastSize = content.leastSize;
-				ubyte[] buf;
-				buf.length = leastSize;
-				content.read(buf);
-				tmpFile.rawWrite(buf);
-			}
-
-			tmpFile.flush;
-			std.file.copy(tmpPath, nativePath);
-			std.file.remove(tmpPath);
-		}
-
-		void remove() {
-			super.remove;
-
-			if(isCollection) {
-				auto childList = getChildren;
-
-				foreach(c; childList)
-					c.remove;
-
-				nativePath.rmdir;
-			} else
-				nativePath.remove;
-		}
-	}
-
-	@property {
-
-		string contentType() {
-			return getMimeTypeForFile(nativePath);
-		}
-
-		SysTime creationDate() {
-			return nativePath.creationDate;
-		}
-
-		string eTag() {
-			return nativePath.eTag;
-		}
-
-		SysTime lastModified() {
-			return nativePath.lastModified;
-		}
-
-		ulong contentLength() {
-			return nativePath.contentLength;
-		}
-
-		string[] resourceType() {
-			return ["collection:DAV:", "calendar:urn:ietf:params:xml:ns:caldav"];
-		}
-
-		override bool isCollection() {
-			return nativePath.isDir;
-		}
-
-		override InputStream stream() {
-			return nativePath.toStream;
 		}
 
 		string calendarDescription() {
@@ -248,6 +127,166 @@ class DavFileCalendarResource : DavCalendarBaseResource {
 				return "";
 
 			return user.principalURL;
+		}
+	}
+}
+
+/// Represents a file or directory DAV resource. NS=urn:ietf:params:xml:ns:caldav
+class DavFileBaseCalendarResource : DavCalendarBaseResource {
+
+	protected {
+		immutable Path filePath;
+		immutable string nativePath;
+		IFileDav dav;
+	}
+
+	this(IFileDav dav, URL url, bool forceCreate = false) {
+		super(dav, url, forceCreate);
+
+		this.dav = dav;
+		auto path = url.path;
+
+		path.normalize;
+
+		filePath = dav.filePath(url);
+		nativePath = filePath.toNativeString();
+
+		if(!nativePath.exists)
+			throw new DavException(HTTPStatus.notFound, "File not found.");
+
+		href = path.toString;
+	}
+
+	override bool[string] getChildren() {
+		DavResource[] list;
+		string listPath = nativePath.decode;
+		return getFolderContent!"*"(listPath, dav.rootFile, dav.rootUrl);
+	}
+
+	@property {
+
+		string eTag() {
+			return nativePath.eTag;
+		}
+
+		SysTime creationDate() {
+			return nativePath.creationDate;
+		}
+
+		SysTime lastModified() {
+			return nativePath.lastModified;
+		}
+
+		override bool isCollection() {
+			return nativePath.isDir;
+		}
+	}
+}
+
+class FileDavCalendarCollection : DavFileBaseCalendarResource {
+
+	this(IFileDav dav, URL url, bool forceCreate = false) {
+		super(dav, url, forceCreate);
+
+		if(!nativePath.isDir)
+			throw new DavException(HTTPStatus.internalServerError, nativePath ~ ": Path must be a folder.");
+	}
+
+	@property {
+		ulong contentLength() {
+			return 0;
+		}
+
+		string contentType() {
+			return "text/directory";
+		}
+
+		string[] resourceType() {
+			return ["collection:DAV:", "calendar:urn:ietf:params:xml:ns:caldav"];
+		}
+
+		override InputStream stream() {
+			throw new DavException(HTTPStatus.internalServerError, "can't get stream from folder.");
+		}
+	}
+
+	override {
+		void setContent(const ubyte[] content) {
+			throw new DavException(HTTPStatus.internalServerError, "can't set content for collection.");
+		}
+
+		void setContent(InputStream content, ulong size) {
+			throw new DavException(HTTPStatus.internalServerError, "can't set content for collection.");
+		}
+	}
+}
+
+/// Represents a file or directory DAV resource. NS=urn:ietf:params:xml:ns:caldav
+class FileDavCalendarResource : DavFileBaseCalendarResource {
+
+	this(IFileDav dav, URL url, bool forceCreate = false) {
+		super(dav, url, forceCreate);
+
+		if(nativePath.isDir)
+			throw new DavException(HTTPStatus.internalServerError, nativePath ~ ": Path must be a file.");
+	}
+
+	@property {
+		ulong contentLength() {
+			return nativePath.contentLength;
+		}
+
+		string contentType() {
+			return getMimeTypeForFile(nativePath);
+		}
+
+		string[] resourceType() {
+			return ["calendar:urn:ietf:params:xml:ns:caldav"];
+		}
+
+		override InputStream stream() {
+			return nativePath.toStream;
+		}
+	}
+
+	override {
+		DavProp property(string key) {
+			if(hasDavInterfaceProperty!ICalendarCollectionProperties(key))
+				return getDavInterfaceProperty!ICalendarCollectionProperties(key, this);
+
+			if(hasDavInterfaceProperty!IDavResourceExtendedProperties(key))
+				return getDavInterfaceProperty!IDavResourceExtendedProperties(key, this);
+
+			return super.property(key);
+		}
+
+		void setContent(const ubyte[] content) {
+			std.stdio.write(nativePath, content);
+		}
+
+		void setContent(InputStream content, ulong size) {
+			if(nativePath.isDir)
+				throw new DavException(HTTPStatus.conflict, "");
+
+			auto tmpPath = filePath.to!string ~ ".tmp";
+			auto tmpFile = File(tmpPath, "w");
+
+			while(!content.empty) {
+				auto leastSize = content.leastSize;
+				ubyte[] buf;
+				buf.length = leastSize;
+				content.read(buf);
+				tmpFile.rawWrite(buf);
+			}
+
+			tmpFile.flush;
+			std.file.copy(tmpPath, nativePath);
+			std.file.remove(tmpPath);
+		}
+
+		void remove() {
+			super.remove;
+			nativePath.remove;
 		}
 	}
 }

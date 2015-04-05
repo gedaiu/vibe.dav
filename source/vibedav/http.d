@@ -170,9 +170,8 @@ struct DavResponse {
 		string str = `<?xml version="1.0" encoding="UTF-8"?>`;
 		auto response = parseXMLProp(`<d:multistatus xmlns:d="DAV:"></d:multistatus>`);
 
-		foreach(item; list) {
+		foreach(item; list)
 			item.filterProps(response["d:multistatus"], props);
-		}
 
 		_content =  str ~ response.toString;
 	}
@@ -223,6 +222,10 @@ struct DavRequest {
 
 		DavProp content() {
 			DavProp document;
+
+			if(request.bodyReader is null)
+				return document;
+
 			string requestXml = cast(string)request.bodyReader.readAllUTF8;
 
 			debug writeln("requestXml:", requestXml);
@@ -282,8 +285,15 @@ struct DavRequest {
 			return getHeader!"Overwrite"(request.headers) == "T";
 		}
 
-		static DavRequest Create() {
-			HTTPServerRequest req = new HTTPServerRequest(Clock.currTime, 0);
+		static DavRequest Create(string requestUrl="", string[string] headers = cast(string[string])[]) {
+			InetHeaderMap inetHeaders;
+
+			//set the headers
+			foreach(string name, string val; headers)
+				inetHeaders[name] = val;
+
+			HTTPServerRequest req = createTestHTTPServerRequest(URL(requestUrl), HTTPMethod.GET, inetHeaders);
+
 			return DavRequest(req);
 		}
 

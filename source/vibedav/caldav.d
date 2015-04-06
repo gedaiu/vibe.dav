@@ -205,8 +205,14 @@ class FileDavCalendarCollection : DavFileBaseCalendarResource {
 			return ["collection:DAV:", "calendar:urn:ietf:params:xml:ns:caldav"];
 		}
 
-		override InputStream stream() {
-			throw new DavException(HTTPStatus.internalServerError, "can't get stream from folder.");
+		override {
+			InputStream stream() {
+				throw new DavException(HTTPStatus.internalServerError, "can't get stream from folder.");
+			}
+
+			string type() {
+				return "FileDavCalendarCollection";
+			}
 		}
 	}
 
@@ -244,8 +250,14 @@ class FileDavCalendarResource : DavFileBaseCalendarResource {
 			return ["calendar:urn:ietf:params:xml:ns:caldav"];
 		}
 
-		override InputStream stream() {
-			return nativePath.toStream;
+		override {
+			InputStream stream() {
+				return nativePath.toStream;
+			}
+
+			string type() {
+				return "FileDavCalendarCollection";
+			}
 		}
 	}
 
@@ -289,4 +301,21 @@ class FileDavCalendarResource : DavFileBaseCalendarResource {
 			nativePath.remove;
 		}
 	}
+}
+
+@testName("factory get calendar collection")
+unittest {
+	"./test/admin".mkdirRecurse;
+
+	alias T = FileDavResourceFactory!(
+		"", "test",
+		"",      FileDavCollection,          FileDavResource,
+		":user", FileDavCalendarCollection,  FileDavCalendarResource
+	);
+
+	auto dav = new FileDav!T;
+	auto res = T.Get(dav, URL("http://127.0.0.1/admin"));
+
+	writeln("res.type ", res.type);
+	assert(res.type == "FileDavCalendarCollection");
 }

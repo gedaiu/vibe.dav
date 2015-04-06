@@ -31,6 +31,7 @@ import std.stdio;
 import std.typecons;
 import std.uri;
 import std.uuid;
+import std.algorithm.comparison : max;
 
 import tested: testName = name;
 
@@ -422,35 +423,52 @@ class FileDavResourceFactory(T...) if(T.length >= 5) {
 					return null;
 			}
 
+			bool isVarPiece(string piece) {
+				if(piece.length == 0)
+					return false;
+
+				return piece[0] == ':';
+			}
+
+			ulong pathMatch(string needle, string hystack) {
+				if(hystack.length >= needle.length && hystack[0..needle.length] == needle)
+					return needle.length;
+
+				auto needlePieces = Path(needle);
+				auto hystackPieces = Path(hystack);
+
+				if(hystackPieces.length < needlePieces.length)
+					return -1;
+
+				foreach(i; 0..needlePieces.length)
+					if(!isVarPiece(needlePieces[i].toString) && needlePieces[i] != hystackPieces[i])
+						return -1;
+
+				return needle.length;
+			}
+
 			long FindPathIndex(List...)(const string path, const ulong score = 0, const ulong start = 0) {
-
 				if(path == List[0])
-					return start;
+					return start / 3;
 
-				bool found;
-
-				if(List[0].length >= score && path.length >= List[0].length && path[0..List[0].length] == List[0])
-					found = true;
+				auto localScore = max(pathMatch(List[0], path), score);
 
 				static if(List.length > 3) {
 					long otherRes;
 
-					if(found)
-						otherRes = FindPathIndex!(List[3..$])(path, List[0].length, start+3);
-					else
-						otherRes = FindPathIndex!(List[3..$])(path, score, start+3);
+					otherRes = FindPathIndex!(List[3..$])(path, localScore, start+3);
 
 					if(otherRes > -1)
 						return otherRes;
 				}
 
-				return start;
+				return start / 3;
 			}
 		}
 	}
 }
 
-@testName("File path url without slashes")
+@testName("get file path when the url is without slashes")
 unittest {
 	alias T = FileDavResourceFactory!(
 		"location", "test",
@@ -462,7 +480,7 @@ unittest {
 	assert(path.toString == "test/file.txt");
 }
 
-@testName("File path url with slashes")
+@testName("get file path when the url is with slashes")
 unittest {
 	alias T = FileDavResourceFactory!(
 		"/location/", "test",
@@ -474,7 +492,7 @@ unittest {
 	assert(path.toString == "test/file.txt");
 }
 
-@testName("Factory get collection")
+@testName("factory get collection")
 unittest {
 	"./test/".mkdirRecurse;
 
@@ -488,7 +506,7 @@ unittest {
 	assert(res.type == "FileDavCollection");
 }
 
-@testName("Factory create collection")
+@testName("factory create collection")
 unittest {
 	"test/".mkdirRecurse;
 
@@ -506,8 +524,7 @@ unittest {
 	"test".rmdirRecurse;
 }
 
-
-@testName("Factory create resource")
+@testName("factory create resource")
 unittest {
 	"./test/".mkdirRecurse;
 

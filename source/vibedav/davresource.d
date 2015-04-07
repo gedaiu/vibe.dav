@@ -313,7 +313,6 @@ class DavResource : IDavResourceProperties {
 	}
 
 	DavProp property(string key) {
-
 		if(user !is null && user.hasProperty(key))
 			return user.property(key);
 

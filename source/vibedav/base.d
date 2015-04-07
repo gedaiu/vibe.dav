@@ -64,8 +64,8 @@ class DavException : Exception {
 }
 
 interface IDav {
-	DavResource getResource(URL url);
-	DavResource[] getResources(URL url, ulong depth, IDavUser user);
+	DavResource getResource(URL url, IDavUser user = null);
+	DavResource[] getResources(URL url, ulong depth, IDavUser user = null);
 	DavResource createCollection(URL url);
 	DavResource createResource(URL url);
 
@@ -188,7 +188,7 @@ abstract class DavBase : IDav {
 		DavResource[] list;
 		IDavUser user;
 
-		if(userCollection)
+		if(userCollection !is null)
 			user = userCollection.GetDavUser(request.username);
 
 		list = getResources(request.url, request.depth, user);

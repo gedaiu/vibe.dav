@@ -342,5 +342,3 @@ struct iCalendar {
 	vTimezone[] vTimezones;
 	vAlarm[] vAlarms;
 }
-
-

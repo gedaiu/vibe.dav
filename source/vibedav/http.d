@@ -163,7 +163,6 @@ struct DavResponse {
 	}
 
 	void setPropContent (DavResource[] list, bool[string] props) {
-		import std.stdio;
 		statusCode = HTTPStatus.multiStatus;
 		mimeType = "application/xml";
 

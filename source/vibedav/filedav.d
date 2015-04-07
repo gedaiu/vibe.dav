@@ -363,13 +363,15 @@ class FileDavResourceFactory(T...) if(T.length >= 5) {
 			return CreateResourceWithDavType!(T[4..$])(dav, pos, url);
 		}
 
-		DavResource Get(IFileDav dav, const URL url) {
+		DavResource Get(IFileDav dav, const URL url, IDavUser user = null) {
 			DavResource res;
 			Path path = FilePath(url);
 			res = GetResourceOrCollection!(T[2..$])(dav, url, path);
 
 			if(res is null)
 				throw new DavException(HTTPStatus.notFound, "Not found");
+
+			res.user = user;
 
 			return res;
 		}
@@ -391,7 +393,7 @@ class FileDavResourceFactory(T...) if(T.length >= 5) {
 				Path path = FilePath(url);
 				string strPath = path.toString;
 
-				long pos = FindPathIndex!(T[2..$])(strPath);
+				long pos = FindPathIndex!(T[2..$])(strPath[RootFile.length..$].stripSlashes);
 
 				if(pos == -1)
 					throw new DavException(HTTPStatus.notFound, "Not found");
@@ -403,9 +405,9 @@ class FileDavResourceFactory(T...) if(T.length >= 5) {
 				alias Res = List[0];
 				assert(pos < List.length);
 
-				if(pos == 0)
+				if(pos == 0) {
 					return new Res(dav, url);
-				else static if(List.length >= 3)
+				} else static if(List.length >= 3)
 					return NewResource!(List[3..$])(dav, pos - 1, url);
 				else
 					return null;
@@ -430,7 +432,7 @@ class FileDavResourceFactory(T...) if(T.length >= 5) {
 				return piece[0] == ':';
 			}
 
-			ulong pathMatch(string needle, string hystack) {
+			long pathMatch(string needle, string hystack) {
 				if(hystack.length >= needle.length && hystack[0..needle.length] == needle)
 					return needle.length;
 
@@ -447,7 +449,7 @@ class FileDavResourceFactory(T...) if(T.length >= 5) {
 				return needle.length;
 			}
 
-			long FindPathIndex(List...)(const string path, const ulong score = 0, const ulong start = 0) {
+			long FindPathIndex(List...)(const string path, const long score = 0, const long start = 0) {
 				if(path == List[0])
 					return start / 3;
 
@@ -462,7 +464,10 @@ class FileDavResourceFactory(T...) if(T.length >= 5) {
 						return otherRes;
 				}
 
-				return start / 3;
+				if(localScore > score)
+					return start / 3;
+
+				return -1;
 			}
 		}
 	}
@@ -557,23 +562,23 @@ class FileDav(T) : DavBase, IFileDav {
 		return T.FilePath(url);
 	}
 
-	DavResource getResource(URL url) {
+	DavResource getResource(URL url, IDavUser user = null) {
 		auto filePath = filePath(url);
 
 		if(!filePath.toString.exists)
 			throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
 
-		return T.Get(this, url);
+		return T.Get(this, url, user);
 	}
 
-	DavResource[] getResources(URL url, ulong depth, IDavUser user) {
+	DavResource[] getResources(URL url, ulong depth, IDavUser user = null) {
 		DavResource[] list;
 		auto filePath = filePath(url);
 
 		if(!filePath.toString.exists)
 			throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
 
-		auto res = getResource(url);
+		auto res = getResource(url, user);
 
 		if(res !is null) {
 			list ~= res;

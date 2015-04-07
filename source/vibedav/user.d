@@ -44,8 +44,6 @@ interface IDavBaseUser {
 	}
 }
 
-
-
 interface ICalDavUser : IDavBaseUser {
 	@property pure {
 

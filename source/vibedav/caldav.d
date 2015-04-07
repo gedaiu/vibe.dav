@@ -68,6 +68,7 @@ class DavCalendarBaseResource : DavResource, ICalendarCollectionProperties, IDav
 
 	this(IDav dav, URL url, bool forceCreate = false) {
 		super(dav, url);
+
 		this.dav = dav;
 	}
 
@@ -151,7 +152,7 @@ class DavFileBaseCalendarResource : DavCalendarBaseResource {
 		filePath = dav.filePath(url);
 		nativePath = filePath.toNativeString();
 
-		if(!nativePath.exists)
+		if(!forceCreate && !nativePath.exists)
 			throw new DavException(HTTPStatus.notFound, "File not found.");
 
 		href = path.toString;
@@ -187,6 +188,9 @@ class FileDavCalendarCollection : DavFileBaseCalendarResource {
 
 	this(IFileDav dav, URL url, bool forceCreate = false) {
 		super(dav, url, forceCreate);
+
+		if(forceCreate && !nativePath.exists)
+			nativePath.mkdirRecurse;
 
 		if(!nativePath.isDir)
 			throw new DavException(HTTPStatus.internalServerError, nativePath ~ ": Path must be a folder.");
@@ -233,8 +237,11 @@ class FileDavCalendarResource : DavFileBaseCalendarResource {
 	this(IFileDav dav, URL url, bool forceCreate = false) {
 		super(dav, url, forceCreate);
 
-		if(nativePath.isDir)
+		if(!forceCreate && nativePath.isDir)
 			throw new DavException(HTTPStatus.internalServerError, nativePath ~ ": Path must be a file.");
+
+		if(forceCreate && !nativePath.exists)
+			File(nativePath, "w");
 	}
 
 	@property {
@@ -316,6 +323,5 @@ unittest {
 	auto dav = new FileDav!T;
 	auto res = T.Get(dav, URL("http://127.0.0.1/admin"));
 
-	writeln("res.type ", res.type);
 	assert(res.type == "FileDavCalendarCollection");
 }

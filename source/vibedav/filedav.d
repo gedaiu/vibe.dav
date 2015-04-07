@@ -36,12 +36,20 @@ import std.algorithm.comparison : max;
 import tested: testName = name;
 
 string stripSlashes(string path) {
+	return path.stripBeginSlashes.stripEndSlasshes;
+}
+
+string stripBeginSlashes(string path) {
 	if(path.length > 0 && path[0] == '/')
 		path = path[1..$];
 
 	if(path.length > 1 && path[0..2] == "./")
 		path = path[2..$];
 
+	return path;
+}
+
+string stripEndSlasshes(string path) {
 	if(path.length > 0 && path[path.length-1] == '/')
 		path = path[0..$-1];
 
@@ -139,7 +147,13 @@ abstract class FileDavResourceBase : DavResource {
 		path.normalize;
 
 		filePath = dav.filePath(url);
-		nativePath = filePath.toNativeString();
+
+		auto nPath = filePath.toNativeString();
+
+		if(nPath == "")
+			nativePath = "./";
+		else
+			nativePath = nPath;
 
 		if(!forceCreate && !nativePath.exists)
 			throw new DavException(HTTPStatus.notFound, "File not found.");
@@ -161,7 +175,7 @@ abstract class FileDavResourceBase : DavResource {
 		}
 
 		string[] resourceType() {
-			return ["collection:DAV:"];
+			return [];
 		}
 
 		override bool isCollection() {
@@ -194,11 +208,11 @@ class FileDavCollection : FileDavResourceBase {
 	this(IFileDav dav, URL url, bool forceCreate = false) {
 		super(dav, url, forceCreate);
 
-		if(nativePath.exists && !nativePath.isDir)
-			throw new DavException(HTTPStatus.internalServerError, nativePath ~ ": Path must be a folder.");
-
 		if(forceCreate && !nativePath.exists)
 			nativePath.mkdirRecurse;
+
+		if(nativePath.exists && !nativePath.isDir)
+			throw new DavException(HTTPStatus.internalServerError, nativePath ~ ": Path must be a folder.");
 	}
 
 	override bool[string] getChildren() {
@@ -251,8 +265,14 @@ class FileDavCollection : FileDavResourceBase {
 			return 0;
 		}
 
-		override nothrow string type() {
-			return "FileDavCollection";
+		override {
+			string[] resourceType() {
+				return ["collection:DAV:"];
+			}
+
+			nothrow string type() {
+				return "FileDavCollection";
+			}
 		}
 	}
 }
@@ -270,16 +290,16 @@ class FileDavResource : FileDavResourceBase {
 			File(nativePath, "w");
 	}
 
-	override bool[string] getChildren() {
-		return getFolderContent!"*"(nativePath, dav.rootFile, dav.rootUrl);
-	}
-
-	override void remove() {
-		super.remove;
-		nativePath.remove;
-	}
-
 	override {
+		bool[string] getChildren() {
+			return getFolderContent!"*"(nativePath, dav.rootFile, dav.rootUrl);
+		}
+
+		void remove() {
+			super.remove;
+			nativePath.remove;
+		}
+
 		void setContent(const ubyte[] content) {
 			std.stdio.write(nativePath, content);
 		}
@@ -366,6 +386,7 @@ class FileDavResourceFactory(T...) if(T.length >= 5) {
 		DavResource Get(IFileDav dav, const URL url, IDavUser user = null) {
 			DavResource res;
 			Path path = FilePath(url);
+
 			res = GetResourceOrCollection!(T[2..$])(dav, url, path);
 
 			if(res is null)
@@ -464,7 +485,7 @@ class FileDavResourceFactory(T...) if(T.length >= 5) {
 						return otherRes;
 				}
 
-				if(localScore > score)
+				if(localScore > score || (score == 0 && List[0] == ""))
 					return start / 3;
 
 				return -1;
@@ -503,7 +524,7 @@ unittest {
 
 	alias T = FileDavResourceFactory!(
 		"", "test",
-		"test", FileDavCollection, FileDavResource);
+		"", FileDavCollection, FileDavResource);
 
 	auto dav = new FileDav!T;
 	auto res = T.Get(dav, URL("http://127.0.0.1/"));
@@ -517,7 +538,7 @@ unittest {
 
 	alias T = FileDavResourceFactory!(
 		"", "test",
-		"test", FileDavCollection, FileDavResource);
+		"", FileDavCollection, FileDavResource);
 
 	auto dav = new FileDav!T;
 	auto res = T.CreateCollection(dav, URL("http://127.0.0.1/newCollection"));
@@ -535,7 +556,7 @@ unittest {
 
 	alias T = FileDavResourceFactory!(
 		"", "test",
-		"test", FileDavCollection, FileDavResource);
+		"", FileDavCollection, FileDavResource);
 
 	auto dav = new FileDav!T;
 	auto res = T.CreateResource(dav, URL("http://127.0.0.1/newResource.txt"));

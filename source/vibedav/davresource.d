@@ -238,7 +238,7 @@ interface IDavResourceProperties {
 		@ResourceProperty("creationdate", "DAV:")
 		SysTime creationDate();
 
-		@ResourceProperty("lastmodified", "DAV:")
+		@ResourceProperty("getlastmodified", "DAV:")
 		SysTime lastModified();
 
 		@ResourceProperty("getetag", "DAV:")

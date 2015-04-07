@@ -285,14 +285,14 @@ abstract class DavBase : IDav {
 
 	void put(DavRequest request, DavResponse response) {
 		DavResource resource = getOrCreateResource(request.url, response.statusCode);
-
 		DavStorage.locks.check(request.url, request.ifCondition);
 
 		resource.setContent(request.stream, request.contentLength);
 
 		DavStorage.locks.setETag(resource.url, resource.eTag);
 
-		response.statusCode = HTTPStatus.created;
+		response.statusCode = HTTPStatus.created;writeln("1");
+
 		response.flush;
 	}
 
@@ -315,11 +315,8 @@ abstract class DavBase : IDav {
 		if(request.contentLength > 0)
 			throw new DavException(HTTPStatus.unsupportedMediaType, "Body must be empty");
 
-		try auto resource = getResource(request.url.parentURL);
-
-		catch (DavException e)
-			if(e.status == HTTPStatus.notFound)
-				throw new DavException(HTTPStatus.conflict, "Missing parent");
+		if(!exists(request.url.parentURL))
+			throw new DavException(HTTPStatus.conflict, "Missing parent");
 
 		DavStorage.locks.check(request.url, ifHeader);
 

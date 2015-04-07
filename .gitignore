@@ -9,3 +9,7 @@ __test__library__
 vibe-dav
 vibe-dav.sublime-project
 results.json
+examples/webDav/webdavexample
+examples/fileDav/filedav
+examples/fileDav/dub.selections.json
+

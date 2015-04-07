@@ -70,5 +70,5 @@ interface ICalDavUser : IDavBaseUser {
 }
 
 interface IDavUserCollection {
-	pure IDavUser GetDavUser(string name);
+	IDavUser GetDavUser(const string name);
 }

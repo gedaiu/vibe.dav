@@ -325,3 +325,59 @@ unittest {
 
 	assert(res.type == "FileDavCalendarCollection");
 }
+
+
+class BaseCalDavUser : ICalDavUser, IDavUser {
+
+	immutable string name;
+
+	this(const string name) {
+		this.name = name;
+	}
+
+	pure {
+		@property {
+			string currentUserPrincipal() {
+				return "/calendar/"~name~"/";
+			}
+
+			string[] principalCollectionSet() {
+				return ["/calendar/"];
+			}
+
+			string principalURL() {
+				return currentUserPrincipal;
+			}
+
+			string[] calendarHomeSet() {
+				return ["/calendar/"~name~"/"];
+			}
+
+			string[] calendarUserAddressSet() {
+				return [];
+			}
+
+			string scheduleInboxURL() {
+				return "/calendar/"~name~"/inbox/";
+			}
+
+			string scheduleOutboxURL()  {
+				return "/calendar/"~name~"/outbox/";
+			}
+		}
+
+		bool hasProperty(string name) {
+			return hasDavInterfaceProperty!ICalDavUser(name);
+		}
+	}
+
+	DavProp property(string name) {
+		return getDavInterfaceProperty!ICalDavUser(name, this);
+	}
+}
+
+class BaseCalDavUserCollection : IDavUserCollection {
+	IDavUser GetDavUser(const string name) {
+		return new BaseCalDavUser(name);
+	}
+}

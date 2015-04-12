@@ -712,5 +712,10 @@ void serveFileDav(T)(URLRouter router, IDavUserCollection userCollection) {
 	auto fileDav = new FileDav!T;
 
 	fileDav.userCollection = userCollection;
-	router.any("/" ~ T.RootUrl ~ "/*", serveDav(fileDav));
+
+	string url = T.RootUrl.stripSlashes;
+	if(url != "") url = "/"~url~"/";
+
+
+	router.any(url ~ "*", serveDav(fileDav));
 }

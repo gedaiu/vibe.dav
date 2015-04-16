@@ -29,10 +29,12 @@ struct ResourcePropertyValue {
 		attribute,
 		tagName,
 		tagAttributes,
-		tag
+		tag,
+		levelTag
 	}
 
 	string name;
+	string name2;
 	string ns;
 	string attr;
 	Mode mode;
@@ -46,6 +48,9 @@ struct ResourcePropertyValue {
 
 		if(mode == Mode.tag)
 			return createTagText(val);
+
+		if(mode == Mode.levelTag)
+			return createLevelTag(val);
 
 		return new DavProp(val);
 	}
@@ -75,6 +80,16 @@ struct ResourcePropertyValue {
 			p.attribute[k] = v;
 
 		return p;
+	}
+
+	DavProp createLevelTag(string val) {
+		DavProp level1 = new DavProp(ns, name);
+		DavProp level2 = new DavProp(ns, name2);
+
+		level2.addChild(DavProp.FromKey(val, ""));
+		level1.addChild(level2);
+
+		return level1;
 	}
 
 	DavProp createTagText(string val) {
@@ -117,6 +132,17 @@ ResourcePropertyValue ResourcePropertyTagText(string name, string ns) {
 	v.name = name;
 	v.ns = ns;
 	v.mode = ResourcePropertyValue.Mode.tag;
+
+	return v;
+}
+
+/// Make the returned value to be: <[level1Name] xmlns=[ns]><[level2Name] xmlns=[ns]><value></[level2Name]></[level1Name]>
+ResourcePropertyValue ResourcePropertyLevelTagText(string level1Name, string level2Name, string ns) {
+	ResourcePropertyValue v;
+	v.name  = level1Name;
+	v.name2 = level2Name;
+	v.ns = ns;
+	v.mode = ResourcePropertyValue.Mode.levelTag;
 
 	return v;
 }
@@ -180,6 +206,7 @@ DavProp propFrom(T, U)(string name, string ns, T value, U tagVal) {
 	{
 		foreach(item; value) {
 			auto tag = tagVal.create(item);
+
 			try
 				p.addChild(tag);
 			catch(Exception e)
@@ -225,7 +252,6 @@ DavProp getDavInterfaceProperty(I)(string key, I davInterface) {
 	return result;
 }
 
-
 enum DavDepth : int {
 	zero = 0,
 	one = 1,
@@ -269,7 +295,7 @@ interface IDavResourceExtendedProperties {
 }
 
 /// Represents a general DAV resource
-class DavResource : IDavResourceProperties {
+abstract class DavResource : IDavResourceProperties {
 	string href;
 	URL url;
 	IDavUser user;

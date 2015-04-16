@@ -138,30 +138,26 @@ class DavFileBaseCalendarResource : DavCalendarBaseResource {
 	protected {
 		immutable Path filePath;
 		immutable string nativePath;
-		IFileDav dav;
+		IDav dav;
+		IFileDav davPlugin;
 	}
 
-	this(IFileDav dav, URL url, bool forceCreate = false) {
-		super(dav, url, forceCreate);
+	this(IFileDav davPlugin, URL url, bool forceCreate = false) {
+		super(davPlugin.dav, url, forceCreate);
 
 		this.dav = dav;
+		this.davPlugin = davPlugin;
 		auto path = url.path;
 
 		path.normalize;
 
-		filePath = dav.filePath(url);
+		filePath = davPlugin.filePath(url);
 		nativePath = filePath.toNativeString();
 
 		if(!forceCreate && !nativePath.exists)
 			throw new DavException(HTTPStatus.notFound, "File not found.");
 
 		href = path.toString;
-	}
-
-	override bool[string] getChildren() {
-		DavResource[] list;
-		string listPath = nativePath.decode;
-		return getFolderContent!"*"(listPath, dav.rootFile, dav.rootUrl);
 	}
 
 	@property {
@@ -186,14 +182,20 @@ class DavFileBaseCalendarResource : DavCalendarBaseResource {
 
 class FileDavCalendarCollection : DavFileBaseCalendarResource {
 
-	this(IFileDav dav, URL url, bool forceCreate = false) {
-		super(dav, url, forceCreate);
+	this(IFileDav davPlugin, URL url, bool forceCreate = false) {
+		super(davPlugin, url, forceCreate);
 
 		if(forceCreate && !nativePath.exists)
 			nativePath.mkdirRecurse;
 
 		if(!nativePath.isDir)
 			throw new DavException(HTTPStatus.internalServerError, nativePath ~ ": Path must be a folder.");
+	}
+
+	override bool[string] getChildren() {
+		DavResource[] list;
+		string listPath = nativePath.decode;
+		return getFolderContent!"*.ics"(listPath, davPlugin.rootFile, dav.rootUrl);
 	}
 
 	@property {
@@ -234,14 +236,19 @@ class FileDavCalendarCollection : DavFileBaseCalendarResource {
 /// Represents a file or directory DAV resource. NS=urn:ietf:params:xml:ns:caldav
 class FileDavCalendarResource : DavFileBaseCalendarResource {
 
-	this(IFileDav dav, URL url, bool forceCreate = false) {
-		super(dav, url, forceCreate);
+	this(IFileDav davPlugin, URL url, bool forceCreate = false) {
+		super(davPlugin, url, forceCreate);
 
 		if(!forceCreate && nativePath.isDir)
 			throw new DavException(HTTPStatus.internalServerError, nativePath ~ ": Path must be a file.");
 
 		if(forceCreate && !nativePath.exists)
 			File(nativePath, "w");
+	}
+
+	override bool[string] getChildren() {
+		bool[string] list;
+		return list;
 	}
 
 	@property {
@@ -310,23 +317,6 @@ class FileDavCalendarResource : DavFileBaseCalendarResource {
 	}
 }
 
-@testName("factory get calendar collection")
-unittest {
-	"./test/admin".mkdirRecurse;
-
-	alias T = FileDavResourceFactory!(
-		"", "test",
-		"",      FileDavCollection,          FileDavResource,
-		":user", FileDavCalendarCollection,  FileDavCalendarResource
-	);
-
-	auto dav = new FileDav!T;
-	auto res = T.Get(dav, URL("http://127.0.0.1/admin"));
-
-	assert(res.type == "FileDavCalendarCollection");
-}
-
-
 class BaseCalDavUser : ICalDavUser, IDavUser {
 
 	immutable string name;
@@ -375,6 +365,7 @@ class BaseCalDavUser : ICalDavUser, IDavUser {
 		return getDavInterfaceProperty!ICalDavUser(name, this);
 	}
 }
+
 
 class BaseCalDavUserCollection : IDavUserCollection {
 	IDavUser GetDavUser(const string name) {

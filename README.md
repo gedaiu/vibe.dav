@@ -12,24 +12,24 @@ CardDav no support
 
 ### FileDav
 
-Use 
+Use
 
-	void serveFileDav(string rootUrl, string rootPath)(URLRouter router, IDavUserCollection userCollection) 
-	
+	void serveFileDav(string rootUrl, string rootPath)(URLRouter router, IDavUserCollection userCollection)
+
 to bind the fileDav handlers to a vibe router.
 
 The next exemple will map every resource from `http://localhost/files` to `public/files`
-	
+
 	import vibedav.filedav;
-	
+
 	...
-	
+
 	auto router = new URLRouter;
 	router.serveFileDav!("/files/", "public/files/")(userConnection);
-	
+
 	...
-	
-	listenHTTP(settings, router);  
+
+	listenHTTP(settings, router);
 
 ### CalDav
 
@@ -37,12 +37,12 @@ Use the factory class that maps resource types to url nodes:
 
 	alias T = FileDavResourceFactory!(
 		[rootUrl], [rootPath],
-		
+
 		[nodeUrl], [collection type], [resource type]
 		...
 	);
-	
-	
+
+
 Example of maping a simple cal dav folder structure (more work will be done here):
 
 auto router = new URLRouter;
@@ -55,13 +55,13 @@ auto router = new URLRouter;
 
 	// Create a custom file maping
 	alias factory = FileDavResourceFactory!(
-		
+
 		// map "http://127.0.0.1/calendar" to "public/calendar"
-		"calendar", "public/calendar", 
-		
+		"calendar", "public/calendar",
+
 		// map any folder to `FileDavCollection` and file to `FileDavResource`
 		"",               FileDavCollection,         FileDavResource,
-		
+
 		// map the `personal` folder from users home
 		// to `FileDavCalendarCollection` and files to `FileDavCalendarResource`
 		":user/personal", FileDavCalendarCollection, FileDavCalendarResource
@@ -69,9 +69,7 @@ auto router = new URLRouter;
 
 	// Bind the custom FileDav maping to a vibe router.
 	router.serveFileDav!factory(userConnection);
-	
+
 	...
-	
+
 	listenHTTP(settings, router);
-
-

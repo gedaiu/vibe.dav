@@ -23,8 +23,8 @@ import vibe.utils.memory;
 
 class FileDavUserHomeCollection : FileDavCollection {
 
-	this(IFileDav dav, URL url, bool forceCreate = false) {
-		super(dav, url, forceCreate);
+	this(IFileDav davPlugin, URL url, bool forceCreate = false) {
+		super(davPlugin, url, forceCreate);
 	}
 
 }

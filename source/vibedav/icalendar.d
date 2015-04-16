@@ -7,6 +7,8 @@
 module vibedav.icalendar;
 
 import tested;
+import std.string;
+import std.stdio;
 
 private mixin template vAccessTpl() {
 	private {
@@ -38,6 +40,25 @@ private mixin template vAccessTpl() {
 			return false;
 		}
 
+		bool setOptionalOr(string value, string key) {
+			bool exists;
+
+			foreach(k; OptionalOr) {
+				if(k in uniqueValues)
+					return false;
+
+				if(k == key)
+					exists = true;
+			}
+
+			if(!exists)
+				return false;
+
+			uniqueValues[key] = value;
+
+			return true;
+		}
+
 		string asString(string type)() {
 			string a;
 
@@ -53,7 +74,7 @@ private mixin template vAccessTpl() {
 	}
 
     void opIndexAssign(string value, string key) {
-    	if(!setUnique(value, key) && !setOptional(value, key))
+    	if(!setUnique(value, key) && !setOptional(value, key) && !setOptionalOr(value, key))
     		throw new Exception("Invalid key `"~key~"`");
     }
 
@@ -86,13 +107,14 @@ struct vEvent {
     	"TRANSP",
     	"UID",
     	"URL",
-    	"RECURID"
+    	"RECURID",
+		"SEQUENCE"
     ];
 
     //either 'dtend' or 'duration' may appear in
     //a 'eventprop', but 'dtend' and 'duration'
     //MUST NOT occur in the same 'eventprop'
-	enum OptionalOr = [ "DTEND", "DURATION" ];
+	enum string[] OptionalOr = [ "DTEND", "DURATION" ];
 
      /// the following are optional,
     /// and MAY occur more than once
@@ -180,7 +202,7 @@ struct vTodo {
 	/// either 'due' or 'duration' may appear in
 	/// a 'todoprop', but 'due' and 'duration'
 	/// MUST NOT occur in the same 'todoprop'
-	enum OptionalOr = [ "DUE", "DURATION" ];
+	enum string[] OptionalOr = [ "DUE", "DURATION" ];
 
     /// the following are optional,
     /// and MAY occur more than once
@@ -228,7 +250,7 @@ struct vJournal {
     	"URL"
     ];
 
-    enum OptionalOr= [];
+    enum string[] OptionalOr= [];
 
     /// the following are optional,
     /// and MAY occur more than once
@@ -267,7 +289,7 @@ struct vFreeBussy {
 	    "URL"
 	];
 
-	enum OptionalOr = [];
+	enum string[] OptionalOr = [];
 
      /// the following are optional,
     /// and MAY occur more than once
@@ -302,7 +324,7 @@ struct vTimezone {
 
 	/// one of 'standardc' or 'daylightc' MUST occur
 	/// and each MAY occur more than once.
-	enum OptionalOr = [ "STANDARDC", "DAYLIGHTC" ];
+	enum string[] OptionalOr = [ "STANDARDC", "DAYLIGHTC" ];
 
     mixin vAccessTpl;
 
@@ -314,6 +336,8 @@ struct vTimezone {
 struct vAlarm {
 
 	enum string[] OptionalUnique = [];
+
+	enum string[] OptionalOr= [];
 
 	enum Optional = [
 		"action",
@@ -341,4 +365,68 @@ struct iCalendar {
 	vFreeBussy[] vFreeBussys;
 	vTimezone[] vTimezones;
 	vAlarm[] vAlarms;
+}
+
+vEvent parseVEvent(string[] data) {
+	vEvent ev;
+
+	foreach(item; data) {
+		auto row = item.split(":");
+
+		if(row.length > 1)
+			ev[row[0]] = row[1];
+	}
+
+	return ev;
+}
+
+
+iCalendar parseICalendar(string data) {
+	iCalendar calendar;
+
+	auto rows = data.split("\n");
+
+	string[] tmpData;
+	bool found;
+
+	foreach(row; rows) {
+		row = row.strip;
+
+		if(row == "BEGIN:VEVENT")
+			found = true;
+		else if(row == "END:VEVENT") {
+			found = false;
+			calendar.vEvents ~= parseVEvent(tmpData);
+			tmpData = [];
+		} else if(found)
+			tmpData ~= row;
+	}
+
+	return calendar;
+}
+
+
+@name("Parse VEVENT")
+unittest {
+
+	string data = "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Apple Inc.//Mac OS X 10.10.3//EN
+CALSCALE:GREGORIAN
+BEGIN:VEVENT
+CREATED:20150412T100602Z
+UID:675FC7E1-B891-4C58-9B60-000000000000
+DTEND:20150401T010000Z
+TRANSP:OPAQUE
+SUMMARY:some name2
+DTSTART:20150401T000000Z
+DTSTAMP:20150412T100602Z
+SEQUENCE:0
+END:VEVENT
+END:VCALENDAR";
+
+	auto parsed = data.parseICalendar;
+
+	assert(parsed.vEvents.length == 1);
+	assert(parsed.vEvents[0]["DTSTART"] == "20150401T000000Z");
 }

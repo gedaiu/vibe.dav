@@ -124,7 +124,7 @@ bool[string] getFolderContent(string format = "*")(string path, Path rootPath, P
 	return list;
 }
 
-interface IFileDav : IDav {
+interface IFileDav : IDavPlugin {
 	Path filePath(URL url);
 	Path rootFile();
 	void match(string path, T)();
@@ -135,18 +135,18 @@ abstract class FileDavResourceBase : DavResource {
 	protected {
 		immutable Path filePath;
 		immutable string nativePath;
-		IFileDav dav;
+		IFileDav davPlugin;
 	}
 
-	this(IFileDav dav, URL url, bool forceCreate = false) {
-		super(dav, url);
+	this(IFileDav davPlugin, URL url, bool forceCreate = false) {
+		super(davPlugin.dav, url);
 
-		this.dav = dav;
+		this.davPlugin = davPlugin;
 		auto path = url.path;
 
 		path.normalize;
 
-		filePath = dav.filePath(url);
+		filePath = davPlugin.filePath(url);
 
 		auto nPath = filePath.toNativeString();
 
@@ -183,7 +183,7 @@ abstract class FileDavResourceBase : DavResource {
 		}
 
 		Path rootPath() {
-			return dav.rootFile;
+			return davPlugin.rootFile;
 		}
 
 		Path rootUrl() {
@@ -205,8 +205,8 @@ abstract class FileDavResourceBase : DavResource {
 /// Represents a Folder DAV resource
 class FileDavCollection : FileDavResourceBase {
 
-	this(IFileDav dav, URL url, bool forceCreate = false) {
-		super(dav, url, forceCreate);
+	this(IFileDav davPlugin, URL url, bool forceCreate = false) {
+		super(davPlugin, url, forceCreate);
 
 		if(forceCreate && !nativePath.exists)
 			nativePath.mkdirRecurse;
@@ -215,17 +215,19 @@ class FileDavCollection : FileDavResourceBase {
 			throw new DavException(HTTPStatus.internalServerError, nativePath ~ ": Path must be a folder.");
 	}
 
-	override bool[string] getChildren() {
-		return getFolderContent!"*"(nativePath, dav.rootFile, dav.rootUrl);
-	}
+	override {
+		bool[string] getChildren() {
+			return getFolderContent!"*"(nativePath, rootPath, rootUrl);
+		}
 
-	override void remove() {
-		super.remove;
+		void remove() {
+			super.remove;
 
-		foreach(string path, bool isCollection; getChildren)
-			dav.getResource(URL("http://a/" ~ path)).remove;
+			foreach(string path, bool isCollection; getChildren)
+				dav.getResource(URL("http://a/" ~ path)).remove;
 
-		nativePath.rmdir;
+			nativePath.rmdir;
+		}
 	}
 
 	@testName("Remove")
@@ -236,7 +238,7 @@ class FileDavCollection : FileDavResourceBase {
 			"","test",
 			"", FileDavCollection, FileDavResource);
 
-		auto dav = new FileDav!factory;
+		auto dav = new FileDav!factory(null);
 		auto file = dav.getResource(URL("http://127.0.0.1/level1/"));
 		file.remove;
 
@@ -280,8 +282,8 @@ class FileDavCollection : FileDavResourceBase {
 /// Represents a file DAV resource
 class FileDavResource : FileDavResourceBase {
 
-	this(IFileDav dav, URL url, bool forceCreate = false) {
-		super(dav, url, forceCreate);
+	this(IFileDav davPlugin, URL url, bool forceCreate = false) {
+		super(davPlugin, url, forceCreate);
 
 		if(nativePath.exists && nativePath.isDir)
 			throw new DavException(HTTPStatus.internalServerError, nativePath ~ ": Path must be a file.");
@@ -292,7 +294,7 @@ class FileDavResource : FileDavResourceBase {
 
 	override {
 		bool[string] getChildren() {
-			return getFolderContent!"*"(nativePath, dav.rootFile, dav.rootUrl);
+			return getFolderContent!"*"(nativePath, rootPath, rootUrl);
 		}
 
 		void remove() {
@@ -434,14 +436,14 @@ class FileDavResourceFactory(T...) if(T.length >= 5) {
 					return null;
 			}
 
-			DavResource CreateResourceWithDavType (List...)(IFileDav dav, const long pos, const URL url) {
+			DavResource CreateResourceWithDavType (List...)(IFileDav davPlugin, const long pos, const URL url) {
 				alias Res = List[0];
 				assert(pos < List.length);
 
 				if(pos == 0)
-					return new Res(dav, url, true);
+					return new Res(davPlugin, url, true);
 				else static if(List.length >= 3)
-					return CreateResourceWithDavType!(List[3..$])(dav, pos - 1, url);
+					return CreateResourceWithDavType!(List[3..$])(davPlugin, pos - 1, url);
 				else
 					return null;
 			}
@@ -500,7 +502,7 @@ unittest {
 		"location", "test",
 		"test", FileDavCollection, FileDavResource);
 
-	auto dav = new FileDav!T;
+	auto dav = new FileDav!T(null);
 	auto path = T.FilePath(URL("http://127.0.0.1/location/file.txt"));
 
 	assert(path.toString == "test/file.txt");
@@ -512,7 +514,7 @@ unittest {
 		"/location/", "test",
 		"test", FileDavCollection, FileDavResource);
 
-	auto dav = new FileDav!T;
+	auto dav = new FileDav!T(null);
 	auto path = T.FilePath(URL("http://127.0.0.1/location/file.txt"));
 
 	assert(path.toString == "test/file.txt");
@@ -526,7 +528,7 @@ unittest {
 		"", "test",
 		"", FileDavCollection, FileDavResource);
 
-	auto dav = new FileDav!T;
+	auto dav = new FileDav!T(null);
 	auto res = T.Get(dav, URL("http://127.0.0.1/"));
 
 	assert(res.type == "FileDavCollection");
@@ -540,7 +542,7 @@ unittest {
 		"", "test",
 		"", FileDavCollection, FileDavResource);
 
-	auto dav = new FileDav!T;
+	auto dav = new FileDav!T(null);
 	auto res = T.CreateCollection(dav, URL("http://127.0.0.1/newCollection"));
 
 	assert("test/newCollection".exists);
@@ -558,7 +560,7 @@ unittest {
 		"", "test",
 		"", FileDavCollection, FileDavResource);
 
-	auto dav = new FileDav!T;
+	auto dav = new FileDav!T(null);
 	auto res = T.CreateResource(dav, URL("http://127.0.0.1/newResource.txt"));
 
 	assert("test/newResource.txt".exists);
@@ -572,15 +574,36 @@ template FileDav(alias T) {
 	alias FileDav = FileDav!(typeof(T));
 }
 
-/// File Dav impplementation
-class FileDav(T) : DavBase, IFileDav {
 
-	this() {
-		super(T.RootUrl);
+/// File Dav impplementation
+class FileDav(T) : IFileDav {
+
+	private {
+		IDav _dav;
+	}
+
+	this(IDav dav) {
+		_dav = dav;
 	}
 
 	Path filePath(URL url) {
 		return T.FilePath(url);
+	}
+
+	bool exists(URL url) {
+		auto filePath = filePath(url);
+
+		writeln("==> 2.exist:", url, " ", filePath);
+
+		return filePath.toString.exists;
+	}
+
+	bool canCreateCollection(URL url) {
+		return true;
+	}
+
+	bool canCreateResource(URL url) {
+		return true;
 	}
 
 	DavResource getResource(URL url, IDavUser user = null) {
@@ -641,8 +664,14 @@ class FileDav(T) : DavBase, IFileDav {
 		return T.CreateResource(this, url);
 	}
 
-	@property Path rootFile() {
-		return Path(T.RootFile);
+	@property {
+		Path rootFile() {
+			return Path(T.RootFile);
+		}
+
+		IDav dav() {
+			return _dav;
+		}
 	}
 }
 
@@ -664,7 +693,8 @@ unittest {
 		"", FileDavCollection, FileDavResource
 	);
 
-	auto fileDav = new FileDav!T;
+	auto dav = new Dav("http://127.0.0.1/");
+	auto fileDav = new FileDav!T(dav);
 
 	/// create some items
 	"test/src/folder".mkdirRecurse;
@@ -674,7 +704,7 @@ unittest {
 	string[string] headers = ["Depth": "infinity", "Destination":"http://127.0.0.1/test/dest/", "Overwrite": "F", "X-Forwarded-Host": "a"];
 	DavRequest request = DavRequest.Create("/test/src/", headers);
 	DavResponse response = DavResponse.Create;
-	fileDav.copy(request, response);
+	dav.copy(request, response);
 
 	/// check
 	assert("test/dest".exists, "dest not found");
@@ -692,7 +722,8 @@ unittest {
 		"", FileDavCollection, FileDavResource
 	);
 
-	auto fileDav = new FileDav!T;
+	auto dav = new Dav("http://127.0.0.1/");
+	auto fileDav = new FileDav!T(dav);
 
 	/// create some items
 	"test".mkdir;
@@ -702,20 +733,21 @@ unittest {
 	string[string] headers = ["Depth": "0", "X-Forwarded-Host": "a"];
 	DavRequest request = DavRequest.Create("/test/prop", headers);
 	DavResponse response = DavResponse.Create;
-	fileDav.propfind(request, response);
+	dav.propfind(request, response);
 
 	/// check
 	"test".rmdirRecurse;
 }
 
 void serveFileDav(T)(URLRouter router, IDavUserCollection userCollection) {
-	auto fileDav = new FileDav!T;
+	auto dav = new Dav(T.RootUrl);
+	auto fileDav = new FileDav!T(dav);
+	dav.registerPlugin(fileDav);
 
-	fileDav.userCollection = userCollection;
+	dav.userCollection = userCollection;
 
 	string url = T.RootUrl.stripSlashes;
 	if(url != "") url = "/"~url~"/";
 
-
-	router.any(url ~ "*", serveDav(fileDav));
+	router.any(url ~ "*", serveDav(dav));
 }

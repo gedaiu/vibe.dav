@@ -18,7 +18,6 @@ import vibe.core.file;
 import vibe.inet.mimetypes;
 import vibe.inet.message;
 import vibe.http.server;
-import vibe.http.fileserver;
 import vibe.http.router : URLRouter;
 import vibe.stream.operations;
 import vibe.internal.meta.uda;
@@ -84,10 +83,30 @@ interface IDav {
 	Path rootUrl();
 }
 
+interface IDavResourceAccess {
+	bool exists(URL url);
+	bool canCreateCollection(URL url);
+	bool canCreateResource(URL url);
+
+	DavResource getResource(URL url, IDavUser user = null);
+	DavResource[] getResources(URL url, ulong depth, IDavUser user = null);
+	DavResource createCollection(URL url);
+	DavResource createResource(URL url);
+}
+
+interface IDavPlugin : IDavResourceAccess {
+	@property IDav dav();/* out(result) {
+		assert(result !is null, "Plugin must have a parent DAV instance.");
+	};*/
+}
 
 /// The main DAV protocol implementation
-abstract class DavBase : IDav {
-	protected Path _rootUrl;
+class Dav : IDav, IDavResourceAccess {
+	protected {
+		Path _rootUrl;
+
+		IDavPlugin[] plugins;
+	}
 
 	IDavUserCollection userCollection;
 
@@ -115,19 +134,6 @@ abstract class DavBase : IDav {
 			}
 
 			return resource;
-		}
-
-		bool exists(URL url) {
-			try {
-				getResource(url);
-			} catch (DavException e) {
-				if(e.status != HTTPStatus.notFound)
-					throw e;
-
-				return false;
-			}
-
-			return true;
 		}
 
 		Path checkPath(Path path) {
@@ -168,16 +174,81 @@ abstract class DavBase : IDav {
 		}
 	}
 
+	void registerPlugin(IDavPlugin plugin) {
+		plugins ~= plugin;
+	}
+
+	DavResource getResource(URL url, IDavUser user = null) {
+		foreach(plugin; plugins)
+			if(plugin.exists(url))
+				return plugin.getResource(url, user);
+
+		throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
+	}
+
+	DavResource[] getResources(URL url, ulong depth, IDavUser user = null) {
+		foreach(plugin; plugins)
+			if(plugin.exists(url))
+				return plugin.getResources(url, depth, user);
+
+		throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
+	}
+
+	DavResource createCollection(URL url) {
+		foreach(plugin; plugins)
+			if(plugin.canCreateCollection(url))
+				return plugin.createCollection(url);
+
+		throw new DavException(HTTPStatus.methodNotAllowed, "No plugin available.");
+	}
+
+	DavResource createResource(URL url) {
+		foreach(plugin; plugins)
+			if(plugin.canCreateResource(url))
+				return plugin.createResource(url);
+
+		throw new DavException(HTTPStatus.methodNotAllowed, "No plugin available.");
+	}
+
+	bool exists(URL url) {
+
+		writeln("==> 1.exist:", url, " ", plugins);
+		foreach(plugin; plugins) {
+			writeln(plugin);
+			if(plugin.exists(url))
+				return true;
+		}
+
+		return false;
+	}
+
+	bool canCreateCollection(URL url) {
+		foreach(plugin; plugins)
+			if(plugin.canCreateCollection(url))
+				return true;
+
+		return false;
+	}
+
+	bool canCreateResource(URL url) {
+		foreach(plugin; plugins)
+			if(plugin.canCreateResource(url))
+				return true;
+
+		return false;
+	}
+
 	void options(DavRequest request, DavResponse response) {
 		DavResource resource = getResource(request.url);
 
 		string path = request.path;
 
 		auto support = (["1", "2", "3"] ~ resource.extraSupport).join(",");
+		auto allow = "OPTIONS, GET, HEAD, DELETE, PROPFIND, PUT, PROPPATCH, COPY, MOVE, LOCK, UNLOCK, REPORT";
 
 		response["Accept-Ranges"] = "bytes";
 		response["DAV"] = support;
-		response["Allow"] = "OPTIONS, GET, HEAD, DELETE, PROPFIND, PUT, PROPPATCH, COPY, MOVE, LOCK, UNLOCK";
+		response["Allow"] = allow;
 		response["MS-Author-Via"] = "DAV";
 
 		response.flush;

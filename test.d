@@ -34,8 +34,7 @@ shared static this() {
 
 		//runUnitTests!app(new JsonTestResultWriter("results.json"));
 
-		//result = runUnitTests!allModules(new ConsoleTestResultWriter);
-		result = runUnitTests!allModules(new JsonDetailTestResultWriter("results.json"));
+		result = runUnitTests!allModules(new ConsoleTestResultWriter);
+		//result = runUnitTests!allModules(new JsonDetailTestResultWriter("results.json"));
 	}
 }
-

@@ -156,17 +156,21 @@ class DirectoryResourcePlugin : IDavResourcePlugin {
 		return getFilePath(baseUrlPath, basePath, url);
 	}
 
-	bool canSetContent(URL url) {
-		return false;
-	}
+	pure nothrow {
+		bool canSetContent(URL url) {
+			return false;
+		}
 
-	bool canGetStream(URL url) {
-		return false;
+		bool canGetStream(URL url) {
+			return false;
+		}
+
+		bool canGetProperty(URL url, string name) {
+			return false;
+		}
 	}
 
 	bool[string] getChildren(URL url) {
-		writeln("getChildren: ", url);
-
 		auto nativePath = filePath(url).toString;
 		return getFolderContent!"*"(nativePath, basePath, baseUrlPath);
 	}
@@ -181,6 +185,10 @@ class DirectoryResourcePlugin : IDavResourcePlugin {
 
 	InputStream stream(URL url) {
 		throw new DavException(HTTPStatus.internalServerError, "Can't get directory stream.");
+	}
+
+	DavProp property(DavResource resource, string name) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
 	}
 
 	pure nothrow @property {
@@ -215,6 +223,10 @@ class FileResourcePlugin : IDavResourcePlugin {
 		return canSetContent(url);
 	}
 
+	bool canGetProperty(URL url, string name) {
+		return false;
+	}
+
 	bool[string] getChildren(URL url) {
 		bool[string] list;
 		return list;
@@ -247,6 +259,10 @@ class FileResourcePlugin : IDavResourcePlugin {
 	InputStream stream(URL url) {
 		auto nativePath = filePath(url).toString;
 		return nativePath.toStream;
+	}
+
+	DavProp property(DavResource resource, string name) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
 	}
 
 	pure nothrow @property {
@@ -286,6 +302,8 @@ class FileDav : IDavPlugin {
 				resource.registerPlugin(new DirectoryResourcePlugin(baseUrlPath, basePath));
 			} else
 				resource.registerPlugin(new FileResourcePlugin(baseUrlPath, basePath));
+
+			resource.registerPlugin(new ResourceBasicProperties);
 		}
 	}
 

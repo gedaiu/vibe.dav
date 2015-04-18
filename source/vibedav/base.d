@@ -217,8 +217,6 @@ class Dav : IDav {
 				break;
 			}
 
-		writeln("tmpList:", tmpList);
-
 		if(depth == 0)
 			list ~= tmpList;
 
@@ -236,8 +234,6 @@ class Dav : IDav {
 			tmpList = [];
 			depth--;
 		}
-
-		writeln("getResources:", list);
 
 		return list;
 	}
@@ -410,7 +406,7 @@ class Dav : IDav {
 
 		DavStorage.locks.setETag(resource.url, resource.eTag);
 
-		response.statusCode = HTTPStatus.created;writeln("1");
+		response.statusCode = HTTPStatus.created;
 
 		response.flush;
 	}
@@ -452,7 +448,6 @@ class Dav : IDav {
 
 		if(url.anchor != "" || request.requestUrl.indexOf("#") != -1)
 			throw new DavException(HTTPStatus.conflict, "Missing parent");
-
 
 		if(!exists(url))
 			throw new DavException(HTTPStatus.notFound, "Not found.");

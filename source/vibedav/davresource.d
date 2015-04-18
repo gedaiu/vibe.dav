@@ -229,7 +229,7 @@ DavProp propFrom(T, U)(string name, string ns, T value, U tagVal) {
 	return p;
 }
 
-DavProp getDavInterfaceProperty(I)(string key, I davInterface) {
+DavProp getDavInterfaceProperty(I)(string key, DavResource resource) {
 	DavProp result;
 
 	void getProp(T...)() {
@@ -239,7 +239,7 @@ DavProp getDavInterfaceProperty(I)(string key, I davInterface) {
 			enum staticKey = val.name ~ ":" ~ val.ns;
 
 			if(staticKey == key) {
-				auto value = __traits(getMember, davInterface, T[0]);
+				auto value = __traits(getMember, resource, T[0]);
 				result = propFrom(val.name, val.ns, value, tagVal);
 			}
 
@@ -294,11 +294,13 @@ interface IDavResourcePlugin {
 
 	bool canSetContent(URL url);
 	bool canGetStream(URL url);
+	bool canGetProperty(URL url, string name);
 
 	bool[string] getChildren(URL url);
 	void setContent(URL url, const ubyte[] content);
 	void setContent(URL url, InputStream content, ulong size);
 	InputStream stream(URL url);
+	DavProp property(DavResource resource, string name);
 
 	@property {
 		string name();
@@ -310,7 +312,83 @@ interface IDavResourcePluginHub {
 	bool hasPlugin(string name);
 }
 
-/// Represents a general DAV resource
+
+class ResourceBasicProperties : IDavResourcePlugin, IDavResourceProperties {
+
+	SysTime creationDate(DavResource resource) {
+		return resource.creationDate;
+	}
+
+	SysTime lastModified(DavResource resource) {
+		return resource.lastModified;
+	}
+
+	string eTag(DavResource resource) {
+		return resource.eTag;
+	}
+
+	string contentType(DavResource resource) {
+		return resource.contentType;
+	}
+
+	ulong contentLength(DavResource resource) {
+		return resource.contentLength;
+	}
+
+	string[] resourceType(DavResource resource) {
+		return resource.resourceType;
+	}
+
+	bool canSetContent(URL url) {
+		return false;
+	}
+
+	bool canGetStream(URL url) {
+		return false;
+	}
+
+	bool canGetProperty(URL url, string name) {
+		writeln("canGetProperty: ", name, " ", url);
+		if(hasDavInterfaceProperty!IDavResourceProperties(name))
+			return true;
+
+		return false;
+	}
+
+	bool[string] getChildren(URL url) {
+		bool[string] list;
+		return list;
+	}
+
+	void setContent(URL url, const ubyte[] content) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't set directory stream.");
+	}
+
+	void setContent(URL url, InputStream content, ulong size) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't set directory stream.");
+	}
+
+	InputStream stream(URL url) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't set directory stream.");
+	}
+
+	DavProp property(DavResource resource, string name) {
+		if(canGetProperty(resource.url, name))
+			return getDavInterfaceProperty!IDavResourceProperties(name, resource);
+
+		throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
+	}
+
+	@property {
+		string name() {
+			return "ResourceBasicProperties";
+		}
+	}
+}
+
+
+
+/// Represents a DAV resource
 class DavResource : IDavResourcePluginHub {
 	string href;
 	URL url;
@@ -371,7 +449,11 @@ class DavResource : IDavResourcePluginHub {
 	}
 
 	DavProp property(string key) {
-		return new DavProp();
+		foreach(plugin; plugins)
+			if(plugin.canGetProperty(url, key))
+				return plugin.property(this, key);
+
+		throw new DavException(HTTPStatus.notFound, "Not Found");
 	}
 
 	void filterProps(DavProp parent, bool[string] props) {
@@ -488,8 +570,6 @@ class DavResource : IDavResourcePluginHub {
 
 	bool[string] getChildren() {
 		bool[string] list;
-
-		writeln("getChildren: ", plugins);
 
 		foreach(plugin; plugins) {
 			auto tmpList = plugin.getChildren(url);

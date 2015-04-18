@@ -13,3 +13,9 @@ examples/webDav/webdavexample
 examples/fileDav/filedav
 examples/fileDav/dub.selections.json
 
+
+.project
+
+.buildpath
+
+.settings/org.dsource.ddt.ide.core.prefs

@@ -109,6 +109,8 @@ bool[string] getFolderContent(string format = "*")(string path, Path rootPath, P
 	enforce(strRootPath.length <= path.length);
 	enforce(strRootPath == path[0..strRootPath.length]);
 
+	writeln("getFolderContent: ", path);
+
 	auto fileList = dirEntries(path, format, SpanMode.shallow);
 
 	foreach(file; fileList) {
@@ -124,549 +126,238 @@ bool[string] getFolderContent(string format = "*")(string path, Path rootPath, P
 	return list;
 }
 
-interface IFileDav : IDavPlugin {
-	Path filePath(URL url);
-	Path rootFile();
-	void match(string path, T)();
+Path getFilePath(Path baseUrlPath, Path basePath, URL url) {
+	string path = url.path.toString.stripSlashes;
+	string filePath;
+
+	filePath = path[baseUrlPath.toString.length..$];
+
+	return basePath ~ filePath;
 }
 
-abstract class FileDavResourceBase : DavResource {
-
-	protected {
-		immutable Path filePath;
-		immutable string nativePath;
-		IFileDav davPlugin;
-	}
-
-	this(IFileDav davPlugin, URL url, bool forceCreate = false) {
-		super(davPlugin.dav, url);
-
-		this.davPlugin = davPlugin;
-		auto path = url.path;
-
-		path.normalize;
-
-		filePath = davPlugin.filePath(url);
-
-		auto nPath = filePath.toNativeString();
-
-		if(nPath == "")
-			nativePath = "./";
-		else
-			nativePath = nPath;
-
-		if(!forceCreate && !nativePath.exists)
-			throw new DavException(HTTPStatus.notFound, "File not found.");
-
-		href = path.toString;
-	}
-
-	@property {
-		string eTag() {
-			return nativePath.eTag;
-		}
-
-		SysTime creationDate() {
-			return nativePath.creationDate;
-		}
-
-		SysTime lastModified() {
-			return nativePath.lastModified;
-		}
-
-		string[] resourceType() {
-			return [];
-		}
-
-		override bool isCollection() {
-			return nativePath.isDir;
-		}
-
-		Path rootPath() {
-			return davPlugin.rootFile;
-		}
-
-		Path rootUrl() {
-			return dav.rootUrl;
-		}
-
-		override {
-			InputStream stream() {
-				return nativePath.toStream;
-			}
-
-			pure nothrow string type() {
-				return "FileDavResourceBase";
-			}
-		}
-	}
-}
-
-/// Represents a Folder DAV resource
-class FileDavCollection : FileDavResourceBase {
-
-	this(IFileDav davPlugin, URL url, bool forceCreate = false) {
-		super(davPlugin, url, forceCreate);
-
-		if(forceCreate && !nativePath.exists)
-			nativePath.mkdirRecurse;
-
-		if(nativePath.exists && !nativePath.isDir)
-			throw new DavException(HTTPStatus.internalServerError, nativePath ~ ": Path must be a folder.");
-	}
-
-	override {
-		bool[string] getChildren() {
-			return getFolderContent!"*"(nativePath, rootPath, rootUrl);
-		}
-
-		void remove() {
-			super.remove;
-
-			foreach(string path, bool isCollection; getChildren)
-				dav.getResource(URL("http://a/" ~ path)).remove;
-
-			nativePath.rmdir;
-		}
-	}
-
-	@testName("Remove")
-	unittest {
-		"test/level1/level2".mkdirRecurse;
-
-		alias factory = FileDavResourceFactory!(
-			"","test",
-			"", FileDavCollection, FileDavResource);
-
-		auto dav = new FileDav!factory(null);
-		auto file = dav.getResource(URL("http://127.0.0.1/level1/"));
-		file.remove;
-
-		assert(!"./test/level1".exists);
-
-		"test".rmdirRecurse;
-	}
-
-	override {
-		void setContent(const ubyte[] content) {
-			throw new DavException(HTTPStatus.conflict, "Can't set folder content.");
-		}
-
-		void setContent(InputStream content, ulong size) {
-			throw new DavException(HTTPStatus.conflict, "Can't set folder content.");
-		}
-	}
-
-	pure @property {
-		string contentType() {
-			// https://tools.ietf.org/html/rfc2425
-			return "text/directory";
-		}
-
-		ulong contentLength() {
-			return 0;
-		}
-
-		override {
-			string[] resourceType() {
-				return ["collection:DAV:"];
-			}
-
-			nothrow string type() {
-				return "FileDavCollection";
-			}
-		}
-	}
-}
-
-/// Represents a file DAV resource
-class FileDavResource : FileDavResourceBase {
-
-	this(IFileDav davPlugin, URL url, bool forceCreate = false) {
-		super(davPlugin, url, forceCreate);
-
-		if(nativePath.exists && nativePath.isDir)
-			throw new DavException(HTTPStatus.internalServerError, nativePath ~ ": Path must be a file.");
-
-		if(forceCreate && !nativePath.exists)
-			File(nativePath, "w");
-	}
-
-	override {
-		bool[string] getChildren() {
-			return getFolderContent!"*"(nativePath, rootPath, rootUrl);
-		}
-
-		void remove() {
-			super.remove;
-			nativePath.remove;
-		}
-
-		void setContent(const ubyte[] content) {
-			std.stdio.write(nativePath, content);
-		}
-
-		void setContent(InputStream content, ulong size) {
-			auto tmpPath = filePath.to!string ~ ".tmp";
-			auto tmpFile = File(tmpPath, "w");
-
-			while(!content.empty) {
-				auto leastSize = content.leastSize;
-				ubyte[] buf;
-				buf.length = leastSize;
-				content.read(buf);
-				tmpFile.rawWrite(buf);
-			}
-
-			tmpFile.flush;
-			std.file.copy(tmpPath, nativePath);
-			std.file.remove(tmpPath);
-		}
-	}
-
-	@property {
-		ulong contentLength() {
-			return nativePath.contentLength;
-		}
-
-		string contentType() {
-			return getMimeTypeForFile(nativePath);
-		}
-
-		override nothrow string type() {
-			return "FileDavResource";
-		}
-	}
-}
-
-/**
-	Initialisation
-
-	FileDavResourceFactory!(
-		RootUrl, RootFile,
-		"/", FileDavCollection, FileDavResource,
-		...
-	)
-*/
-class FileDavResourceFactory(T...) if(T.length >= 5) {
-
-	enum RootUrl = T[0].stripSlashes;
-	enum RootFile = T[1].stripSlashes;
-
-	static {
-		Path FilePath(URL url) {
-			string path = url.path.toString.stripSlashes;
-			string filePath;
-
-			filePath = path[RootUrl.length..$].stripSlashes;
-
-			return Path(RootFile) ~ filePath;
-		}
-
-		DavResource CreateCollection(IFileDav dav, URL url) {
-			auto filePath = FilePath(url);
-
-			if(filePath.toString.exists)
-				throw new DavException(HTTPStatus.methodNotAllowed, "Colection already exists.");
-
-			auto pos = ResourceTypeIndex(url);
-
-			return CreateResourceWithDavType!(T[3..$])(dav, pos, url);
-		}
-
-		DavResource CreateResource(IFileDav dav, URL url) {
-			auto filePath = FilePath(url);
-
-			if(filePath.toString.exists)
-				throw new DavException(HTTPStatus.methodNotAllowed, "Resource already exists.");
-
-			auto pos = ResourceTypeIndex(url);
-
-			return CreateResourceWithDavType!(T[4..$])(dav, pos, url);
-		}
-
-		DavResource Get(IFileDav dav, const URL url, IDavUser user = null) {
-			DavResource res;
-			Path path = FilePath(url);
-
-			res = GetResourceOrCollection!(T[2..$])(dav, url, path);
-
-			if(res is null)
-				throw new DavException(HTTPStatus.notFound, "Not found");
-
-			res.user = user;
-
-			return res;
-		}
-
-		DavResource GetResourceOrCollection(List...)(IFileDav dav, const URL url, const Path path) {
-			alias Resource = List[2];
-			alias Collection = List[1];
-
-			auto pos = ResourceTypeIndex(url);
-
-			if(path.toNativeString.isDir)
-				return NewResource!(List[1..$])(dav, pos, url);
-			else
-				return NewResource!(List[2..$])(dav, pos, url);
-		}
-
-		private {
-			long ResourceTypeIndex(URL url) {
-				Path path = FilePath(url);
-				string strPath = path.toString;
-
-				long pos = FindPathIndex!(T[2..$])(strPath[RootFile.length..$].stripSlashes);
-
-				if(pos == -1)
-					throw new DavException(HTTPStatus.notFound, "Not found");
-
-				return pos;
-			}
-
-			DavResource NewResource(List...)(IFileDav dav, const long pos, const URL url) {
-				alias Res = List[0];
-				assert(pos < List.length);
-
-				if(pos == 0) {
-					return new Res(dav, url);
-				} else static if(List.length >= 3)
-					return NewResource!(List[3..$])(dav, pos - 1, url);
-				else
-					return null;
-			}
-
-			DavResource CreateResourceWithDavType (List...)(IFileDav davPlugin, const long pos, const URL url) {
-				alias Res = List[0];
-				assert(pos < List.length);
-
-				if(pos == 0)
-					return new Res(davPlugin, url, true);
-				else static if(List.length >= 3)
-					return CreateResourceWithDavType!(List[3..$])(davPlugin, pos - 1, url);
-				else
-					return null;
-			}
-
-			bool isVarPiece(string piece) {
-				if(piece.length == 0)
-					return false;
-
-				return piece[0] == ':';
-			}
-
-			long pathMatch(string needle, string hystack) {
-				if(hystack.length >= needle.length && hystack[0..needle.length] == needle)
-					return needle.length;
-
-				auto needlePieces = Path(needle);
-				auto hystackPieces = Path(hystack);
-
-				if(hystackPieces.length < needlePieces.length)
-					return -1;
-
-				foreach(i; 0..needlePieces.length)
-					if(!isVarPiece(needlePieces[i].toString) && needlePieces[i] != hystackPieces[i])
-						return -1;
-
-				return needle.length;
-			}
-
-			long FindPathIndex(List...)(const string path, const long score = 0, const long start = 0) {
-				if(path == List[0])
-					return start / 3;
-
-				auto localScore = max(pathMatch(List[0], path), score);
-
-				static if(List.length > 3) {
-					long otherRes;
-
-					otherRes = FindPathIndex!(List[3..$])(path, localScore, start+3);
-
-					if(otherRes > -1)
-						return otherRes;
-				}
-
-				if(localScore > score || (score == 0 && List[0] == ""))
-					return start / 3;
-
-				return -1;
-			}
-		}
-	}
-}
-
-@testName("get file path when the url is without slashes")
+@testName("Basic getFilePath")
 unittest {
-	alias T = FileDavResourceFactory!(
-		"location", "test",
-		"test", FileDavCollection, FileDavResource);
-
-	auto dav = new FileDav!T(null);
-	auto path = T.FilePath(URL("http://127.0.0.1/location/file.txt"));
-
-	assert(path.toString == "test/file.txt");
+	auto path = getFilePath(Path("test/"), Path("/base/"), URL("http://127.0.0.1/test/file.txt"));
+	assert(path.toString == "/base/file.txt");
 }
 
-@testName("get file path when the url is with slashes")
-unittest {
-	alias T = FileDavResourceFactory!(
-		"/location/", "test",
-		"test", FileDavCollection, FileDavResource);
-
-	auto dav = new FileDav!T(null);
-	auto path = T.FilePath(URL("http://127.0.0.1/location/file.txt"));
-
-	assert(path.toString == "test/file.txt");
-}
-
-@testName("factory get collection")
-unittest {
-	"./test/".mkdirRecurse;
-
-	alias T = FileDavResourceFactory!(
-		"", "test",
-		"", FileDavCollection, FileDavResource);
-
-	auto dav = new FileDav!T(null);
-	auto res = T.Get(dav, URL("http://127.0.0.1/"));
-
-	assert(res.type == "FileDavCollection");
-}
-
-@testName("factory create collection")
-unittest {
-	"test/".mkdirRecurse;
-
-	alias T = FileDavResourceFactory!(
-		"", "test",
-		"", FileDavCollection, FileDavResource);
-
-	auto dav = new FileDav!T(null);
-	auto res = T.CreateCollection(dav, URL("http://127.0.0.1/newCollection"));
-
-	assert("test/newCollection".exists);
-	assert("test/newCollection".isDir);
-	assert(res.type == "FileDavCollection");
-
-	"test".rmdirRecurse;
-}
-
-@testName("factory create resource")
-unittest {
-	"./test/".mkdirRecurse;
-
-	alias T = FileDavResourceFactory!(
-		"", "test",
-		"", FileDavCollection, FileDavResource);
-
-	auto dav = new FileDav!T(null);
-	auto res = T.CreateResource(dav, URL("http://127.0.0.1/newResource.txt"));
-
-	assert("test/newResource.txt".exists);
-	assert(!"test/newResource.txt".isDir);
-	assert(res.type == "FileDavResource");
-
-	"test".rmdirRecurse;
-}
-
-template FileDav(alias T) {
-	alias FileDav = FileDav!(typeof(T));
-}
-
-
-/// File Dav impplementation
-class FileDav(T) : IFileDav {
-
+class DirectoryResourcePlugin : IDavResourcePlugin {
 	private {
-		IDav _dav;
+		Path baseUrlPath;
+		Path basePath;
 	}
 
-	this(IDav dav) {
-		_dav = dav;
+	this(Path baseUrlPath, Path basePath) {
+		this.baseUrlPath = baseUrlPath;
+		this.basePath = basePath;
 	}
 
 	Path filePath(URL url) {
-		return T.FilePath(url);
+		return getFilePath(baseUrlPath, basePath, url);
+	}
+
+	bool canSetContent(URL url) {
+		return false;
+	}
+
+	bool canGetStream(URL url) {
+		return false;
+	}
+
+	bool[string] getChildren(URL url) {
+		writeln("getChildren: ", url);
+
+		auto nativePath = filePath(url).toString;
+		return getFolderContent!"*"(nativePath, basePath, baseUrlPath);
+	}
+
+	void setContent(URL url, const ubyte[] content) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't set directory stream.");
+	}
+
+	void setContent(URL url, InputStream content, ulong size) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't set directory stream.");
+	}
+
+	InputStream stream(URL url) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't get directory stream.");
+	}
+
+	pure nothrow @property {
+		string name() {
+			return "DirectoryResourcePlugin";
+		}
+	}
+}
+
+class FileResourcePlugin : IDavResourcePlugin {
+	private {
+		Path baseUrlPath;
+		Path basePath;
+	}
+
+	this(Path baseUrlPath, Path basePath) {
+		this.baseUrlPath = baseUrlPath;
+		this.basePath = basePath;
+	}
+
+	Path filePath(URL url) {
+		return getFilePath(baseUrlPath, basePath, url);
+	}
+
+	bool canSetContent(URL url) {
+		auto filePath = filePath(url).toString;
+		return filePath.exists;
+	}
+
+
+	bool canGetStream(URL url) {
+		return canSetContent(url);
+	}
+
+	bool[string] getChildren(URL url) {
+		bool[string] list;
+		return list;
+	}
+
+	void setContent(URL url, const ubyte[] content) {
+		auto filePath = filePath(url).toString;
+		std.stdio.write(filePath, content);
+	}
+
+	void setContent(URL url, InputStream content, ulong size) {
+		auto nativePath = filePath(url).toString;
+
+		auto tmpPath = nativePath ~ ".tmp";
+		auto tmpFile = File(tmpPath, "w");
+
+		while(!content.empty) {
+			auto leastSize = content.leastSize;
+			ubyte[] buf;
+			buf.length = leastSize;
+			content.read(buf);
+			tmpFile.rawWrite(buf);
+		}
+
+		tmpFile.flush;
+		std.file.copy(tmpPath, nativePath);
+		std.file.remove(tmpPath);
+	}
+
+	InputStream stream(URL url) {
+		auto nativePath = filePath(url).toString;
+		return nativePath.toStream;
+	}
+
+	pure nothrow @property {
+		string name() {
+			return "FileResourcePlugin";
+		}
+	}
+}
+
+/// File Dav impplementation
+class FileDav : IDavPlugin {
+
+	private {
+		IDav _dav;
+		Path baseUrlPath;
+		Path basePath;
+	}
+
+	this(IDav dav, Path baseUrlPath, Path basePath) {
+		_dav = dav;
+		this.baseUrlPath = baseUrlPath;
+		this.basePath = basePath;
+	}
+
+	private {
+		void setResourceProperties(DavResource resource) {
+			string path = filePath(resource.url).toString;
+
+			resource.creationDate = creationDate(path);
+			resource.lastModified = lastModified(path);
+			resource.eTag = eTag(path);
+			resource.contentType = getMimeTypeForFile(path);
+			resource.contentLength = contentLength(path);
+
+			if(path.isDir) {
+				resource.resourceType ~= "collection:DAV:";
+				resource.registerPlugin(new DirectoryResourcePlugin(baseUrlPath, basePath));
+			} else
+				resource.registerPlugin(new FileResourcePlugin(baseUrlPath, basePath));
+		}
+	}
+
+	string[] support() {
+		return ["1", "2", "3"];
+	}
+
+	Path filePath(URL url) {
+		return getFilePath(baseUrlPath, basePath, url);
 	}
 
 	bool exists(URL url) {
 		auto filePath = filePath(url);
 
-		writeln("==> 2.exist:", url, " ", filePath);
-
 		return filePath.toString.exists;
 	}
 
-	bool canCreateCollection(URL url) {
-		return true;
+	bool canCreateResource(URL url) {
+		return !exists(url);
 	}
 
-	bool canCreateResource(URL url) {
-		return true;
+	bool canCreateCollection(URL url) {
+		return !exists(url);
+	}
+
+	void removeResource(URL url, IDavUser user = null) {
+		if(!exists(url))
+			throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
+
+		auto filePath = filePath(url).toString;
+
+		if(filePath.isDir)
+			filePath.rmdirRecurse;
+		else
+			filePath.remove;
+
 	}
 
 	DavResource getResource(URL url, IDavUser user = null) {
-		auto filePath = filePath(url);
-
-		if(!filePath.toString.exists)
+		if(!exists(url))
 			throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
 
-		return T.Get(this, url, user);
-	}
-
-	DavResource[] getResources(URL url, ulong depth, IDavUser user = null) {
-		DavResource[] list;
 		auto filePath = filePath(url);
 
-		if(!filePath.toString.exists)
-			throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
+		DavResource resource = new DavResource(_dav, url);
+		setResourceProperties(resource);
 
-		auto res = getResource(url, user);
-
-		if(res !is null) {
-			list ~= res;
-
-			if(res.isCollection && depth > 0) {
-				auto childList = res.getChildren;
-
-				foreach(string path, bool isDir; childList) {
-					list ~= getResources(URL("http://a/" ~ path), depth - 1, user);
-				}
-			}
-		}
-
-		return list;
-	}
-
-	DavResource createCollection(URL url) {
-		return T.CreateCollection(this, url);
+		return resource;
 	}
 
 	DavResource createResource(URL url) {
-		return T.CreateResource(this, url);
+		auto filePath = filePath(url).toString;
+
+		File(filePath, "w");
+
+		return getResource(url);
 	}
 
-	DavResource createResources(URL url, ulong depth) {
+	DavResource createCollection(URL url) {
 		auto filePath = filePath(url);
-		auto strFilePath = filePath.toString;
 
-		if(strFilePath.exists)
+		if(filePath.toString.exists)
 			throw new DavException(HTTPStatus.methodNotAllowed, "Resource already exists.");
 
-		if(filePath.endsWithSlash) {
-			strFilePath.mkdirRecurse;
-		} else {
-			auto f = new File(strFilePath, "w");
-			f.close;
-		}
+		filePath.toString.mkdirRecurse;
 
-		return T.CreateResource(this, url);
+		return getResource(url);
 	}
 
 	@property {
-		Path rootFile() {
-			return Path(T.RootFile);
+		string name() {
+			return "FileDav";
 		}
 
 		IDav dav() {
@@ -675,79 +366,19 @@ class FileDav(T) : IFileDav {
 	}
 }
 
-void serveFileDav(string rootUrl, string rootPath)(URLRouter router, IDavUserCollection userCollection) {
+IDav serveFileDav(URLRouter router, string rootUrl, string rootPath, IDavUserCollection userCollection = null) {
+	rootUrl = rootUrl.stripSlashes;
+	rootPath = rootPath.stripSlashes;
 
-	alias T = FileDavResourceFactory!(
-		rootUrl, rootPath,
-		"", FileDavCollection, FileDavResource
-	);
-
-	router.serveFileDav!T(userCollection);
-}
-
-@testName("FileDav copy folder")
-unittest {
-	/// create the webdav instance
-	alias T = FileDavResourceFactory!(
-		"test/", "test",
-		"", FileDavCollection, FileDavResource
-	);
-
-	auto dav = new Dav("http://127.0.0.1/");
-	auto fileDav = new FileDav!T(dav);
-
-	/// create some items
-	"test/src/folder".mkdirRecurse;
-	new File("test/src/file.txt", "w");
-
-	/// do the copy
-	string[string] headers = ["Depth": "infinity", "Destination":"http://127.0.0.1/test/dest/", "Overwrite": "F", "X-Forwarded-Host": "a"];
-	DavRequest request = DavRequest.Create("/test/src/", headers);
-	DavResponse response = DavResponse.Create;
-	dav.copy(request, response);
-
-	/// check
-	assert("test/dest".exists, "dest not found");
-	assert("test/dest/folder".exists, "folder not found");
-	assert("test/dest/file.txt".exists, "file.txt not found");
-
-	"test".rmdirRecurse;
-}
-
-@testName("FileDav check if propfind fails")
-unittest {
-	/// create the webdav instance
-	alias T = FileDavResourceFactory!(
-		"test/", "test",
-		"", FileDavCollection, FileDavResource
-	);
-
-	auto dav = new Dav("http://127.0.0.1/");
-	auto fileDav = new FileDav!T(dav);
-
-	/// create some items
-	"test".mkdir;
-	new File("test/prop", "w");
-
-	/// do the propfind
-	string[string] headers = ["Depth": "0", "X-Forwarded-Host": "a"];
-	DavRequest request = DavRequest.Create("/test/prop", headers);
-	DavResponse response = DavResponse.Create;
-	dav.propfind(request, response);
-
-	/// check
-	"test".rmdirRecurse;
-}
-
-void serveFileDav(T)(URLRouter router, IDavUserCollection userCollection) {
-	auto dav = new Dav(T.RootUrl);
-	auto fileDav = new FileDav!T(dav);
+	auto dav = new Dav(rootUrl);
+	auto fileDav = new FileDav(dav, Path(rootUrl), Path(rootPath));
 	dav.registerPlugin(fileDav);
 
 	dav.userCollection = userCollection;
 
-	string url = T.RootUrl.stripSlashes;
-	if(url != "") url = "/"~url~"/";
+	if(rootUrl != "") rootUrl = "/"~rootUrl~"/";
 
-	router.any(url ~ "*", serveDav(dav));
+	router.any(rootUrl ~ "*", serveDav(dav));
+
+	return dav;
 }

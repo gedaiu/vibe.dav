@@ -62,12 +62,32 @@ class DavException : Exception {
 	}
 }
 
-interface IDav {
+interface IDavResourceAccess {
+	bool exists(URL url);
+	bool canCreateCollection(URL url);
+	bool canCreateResource(URL url);
+
+	void removeResource(URL url, IDavUser user = null);
 	DavResource getResource(URL url, IDavUser user = null);
-	DavResource[] getResources(URL url, ulong depth, IDavUser user = null);
 	DavResource createCollection(URL url);
 	DavResource createResource(URL url);
+}
 
+interface IDavPlugin : IDavResourceAccess {
+	@property {
+		IDav dav();
+		string name();
+
+		string[] support();
+	}
+}
+
+interface IDavPluginHub {
+	void registerPlugin(IDavPlugin plugin);
+	bool hasPlugin(string name);
+}
+
+interface IDav : IDavResourceAccess, IDavPluginHub {
 	void options(DavRequest request, DavResponse response);
 	void propfind(DavRequest request, DavResponse response);
 	void lock(DavRequest request, DavResponse response);
@@ -79,29 +99,13 @@ interface IDav {
 	void move(DavRequest request, DavResponse response);
 	void copy(DavRequest request, DavResponse response);
 
+
 	@property
 	Path rootUrl();
 }
 
-interface IDavResourceAccess {
-	bool exists(URL url);
-	bool canCreateCollection(URL url);
-	bool canCreateResource(URL url);
-
-	DavResource getResource(URL url, IDavUser user = null);
-	DavResource[] getResources(URL url, ulong depth, IDavUser user = null);
-	DavResource createCollection(URL url);
-	DavResource createResource(URL url);
-}
-
-interface IDavPlugin : IDavResourceAccess {
-	@property IDav dav();/* out(result) {
-		assert(result !is null, "Plugin must have a parent DAV instance.");
-	};*/
-}
-
 /// The main DAV protocol implementation
-class Dav : IDav, IDavResourceAccess {
+class Dav : IDav {
 	protected {
 		Path _rootUrl;
 
@@ -178,6 +182,23 @@ class Dav : IDav, IDavResourceAccess {
 		plugins ~= plugin;
 	}
 
+	bool hasPlugin(string name) {
+
+		foreach(plugin; plugins)
+			if(plugin.name == name)
+				return true;
+
+		return false;
+	}
+
+	void removeResource(URL url, IDavUser user = null) {
+		foreach(plugin; plugins)
+			if(plugin.exists(url))
+				return plugin.removeResource(url, user);
+
+		throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
+	}
+
 	DavResource getResource(URL url, IDavUser user = null) {
 		foreach(plugin; plugins)
 			if(plugin.exists(url))
@@ -187,11 +208,38 @@ class Dav : IDav, IDavResourceAccess {
 	}
 
 	DavResource[] getResources(URL url, ulong depth, IDavUser user = null) {
-		foreach(plugin; plugins)
-			if(plugin.exists(url))
-				return plugin.getResources(url, depth, user);
+		DavResource[] list;
+		DavResource[] tmpList;
 
-		throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
+		foreach(plugin; plugins)
+			if(plugin.exists(url)) {
+				tmpList ~= plugin.getResource(url, user);
+				break;
+			}
+
+		writeln("tmpList:", tmpList);
+
+		if(depth == 0)
+			list ~= tmpList;
+
+		while(tmpList.length > 0 && depth > 0) {
+
+			foreach(resource; tmpList) {
+				bool[string] childList = resource.getChildren();
+
+				foreach(string key, bool val; childList) {
+					tmpList ~= getResource(URL("http://a/" ~ key), user);
+				}
+			}
+
+			list ~= tmpList;
+			tmpList = [];
+			depth--;
+		}
+
+		writeln("getResources:", list);
+
+		return list;
 	}
 
 	DavResource createCollection(URL url) {
@@ -211,13 +259,9 @@ class Dav : IDav, IDavResourceAccess {
 	}
 
 	bool exists(URL url) {
-
-		writeln("==> 1.exist:", url, " ", plugins);
-		foreach(plugin; plugins) {
-			writeln(plugin);
+		foreach(plugin; plugins)
 			if(plugin.exists(url))
 				return true;
-		}
 
 		return false;
 	}
@@ -243,11 +287,15 @@ class Dav : IDav, IDavResourceAccess {
 
 		string path = request.path;
 
-		auto support = (["1", "2", "3"] ~ resource.extraSupport).join(",");
+		string[] support;
+
+		foreach(plugin; plugins)
+			support ~= plugin.support;
+
 		auto allow = "OPTIONS, GET, HEAD, DELETE, PROPFIND, PUT, PROPPATCH, COPY, MOVE, LOCK, UNLOCK, REPORT";
 
 		response["Accept-Ranges"] = "bytes";
-		response["DAV"] = support;
+		response["DAV"] = uniq(support).join(",");
 		response["Allow"] = allow;
 		response["MS-Author-Via"] = "DAV";
 
@@ -405,10 +453,14 @@ class Dav : IDav, IDavResourceAccess {
 		if(url.anchor != "" || request.requestUrl.indexOf("#") != -1)
 			throw new DavException(HTTPStatus.conflict, "Missing parent");
 
-		auto resource = getResource(url);
+
+		if(!exists(url))
+			throw new DavException(HTTPStatus.notFound, "Not found.");
+
 		DavStorage.locks.check(url, ifHeader);
 
-		resource.remove();
+		removeResource(url);
+
 		response.flush;
 	}
 
@@ -444,22 +496,18 @@ class Dav : IDav, IDavResourceAccess {
 		}
 
 		void localCopy(DavResource source, DavResource destination) {
-			source.copy(destination.url);
-
 			if(source.isCollection) {
 				auto list = getResources(request.url, DavDepth.infinity, user);
 
 				foreach(child; list) {
 					auto destinationUrl = getDestinationUrl(child);
 
-					if(child.isCollection && !exists(destinationUrl)) {
-						auto destinationChild = createCollection(getDestinationUrl(child));
-						child.copy(destinationChild.url, request.overwrite);
-					} else if(!child.isCollection) {
+					if(child.isCollection && !exists(destinationUrl))
+						createCollection(getDestinationUrl(child));
+					else if(!child.isCollection) {
 						HTTPStatus statusCode;
 						DavResource destinationChild = getOrCreateResource(getDestinationUrl(child), statusCode);
 						destinationChild.setContent(child.stream, child.contentLength);
-						child.copy(destinationChild.url, request.overwrite);
 					}
 				}
 			} else {

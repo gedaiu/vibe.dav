@@ -28,7 +28,7 @@ import std.uuid;
 
 import tested;
 
-
+/*
 interface ICalendarCollectionProperties {
 
 	@property {
@@ -372,3 +372,34 @@ class BaseCalDavUserCollection : IDavUserCollection {
 		return new BaseCalDavUser(name);
 	}
 }
+
+class CalDavHome : IDavPlugin {
+	bool exists(URL url) {
+		return false;
+	}
+
+	bool canCreateCollection(URL url) {
+		return false;
+	}
+
+	bool canCreateResource(URL url) {
+		return false;
+	}
+
+	DavResource getResource(URL url, IDavUser user = null) {
+		return null;
+	}
+
+	DavResource[] getResources(URL url, ulong depth, IDavUser user = null) {
+		return null;
+	}
+
+	DavResource createCollection(URL url) {
+		return null;
+	}
+
+	DavResource createResource(URL url) {
+		return null;
+	}
+}
+*/

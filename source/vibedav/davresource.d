@@ -259,27 +259,24 @@ enum DavDepth : int {
 };
 
 interface IDavResourceProperties {
+	@ResourceProperty("creationdate", "DAV:")
+	SysTime creationDate(DavResource resource);
 
-	@property {
-		@ResourceProperty("creationdate", "DAV:")
-		SysTime creationDate();
+	@ResourceProperty("getlastmodified", "DAV:")
+	SysTime lastModified(DavResource resource);
 
-		@ResourceProperty("getlastmodified", "DAV:")
-		SysTime lastModified();
+	@ResourceProperty("getetag", "DAV:")
+	string eTag(DavResource resource);
 
-		@ResourceProperty("getetag", "DAV:")
-		string eTag();
+	@ResourceProperty("getcontenttype", "DAV:")
+	string contentType(DavResource resource);
 
-		@ResourceProperty("getcontenttype", "DAV:")
-		string contentType();
+	@ResourceProperty("getcontentlength", "DAV:")
+	ulong contentLength(DavResource resource);
 
-		@ResourceProperty("getcontentlength", "DAV:")
-		ulong contentLength();
-
-		@ResourceProperty("resourcetype", "DAV:")
-		@ResourcePropertyTagName()
-		string[] resourceType();
-	}
+	@ResourceProperty("resourcetype", "DAV:")
+	@ResourcePropertyTagName()
+	string[] resourceType(DavResource resource);
 }
 
 interface IDavResourceExtendedProperties {
@@ -291,16 +288,43 @@ interface IDavResourceExtendedProperties {
 	@ResourceProperty("owner", "DAV:")
 	@ResourcePropertyTagText("href", "DAV:")
 	string owner();
+}
 
+interface IDavResourcePlugin {
+
+	bool canSetContent(URL url);
+	bool canGetStream(URL url);
+
+	bool[string] getChildren(URL url);
+	void setContent(URL url, const ubyte[] content);
+	void setContent(URL url, InputStream content, ulong size);
+	InputStream stream(URL url);
+
+	@property {
+		string name();
+	}
+}
+
+interface IDavResourcePluginHub {
+	void registerPlugin(IDavResourcePlugin plugin);
+	bool hasPlugin(string name);
 }
 
 /// Represents a general DAV resource
-abstract class DavResource : IDavResourceProperties {
+class DavResource : IDavResourcePluginHub {
 	string href;
 	URL url;
 	IDavUser user;
 
+	SysTime creationDate;
+	SysTime lastModified;
+	string eTag;
+	string contentType;
+	ulong contentLength;
+	string[] resourceType;
+
 	protected {
+		IDavResourcePlugin[] plugins;
 		IDav dav;
 		DavProp properties; //TODO: Maybe I should move this to Dav class, or other storage
 	}
@@ -319,6 +343,19 @@ abstract class DavResource : IDavResourceProperties {
 		this.properties = DavStorage.resourcePropStorage[strUrl];
 	}
 
+	void registerPlugin(IDavResourcePlugin plugin) {
+		plugins ~= plugin;
+	}
+
+	bool hasPlugin(string name) {
+
+		foreach(plugin; plugins)
+			if(plugin.name == name)
+				return true;
+
+		return false;
+	}
+
 	@property {
 		string name() {
 			return href.baseName;
@@ -328,55 +365,13 @@ abstract class DavResource : IDavResourceProperties {
 			return url.toString;
 		}
 
-		string[] extraSupport() {
-			string[] headers;
-			return headers;
-		}
-
 		nothrow pure string type() {
 			return "DavResource";
 		}
 	}
 
 	DavProp property(string key) {
-		if(user !is null && user.hasProperty(key))
-			return user.property(key);
-
-		if(hasDavInterfaceProperty!IDavResourceProperties(key))
-			return getDavInterfaceProperty!IDavResourceProperties(key, this);
-
-		switch (key) {
-
-			default:
-				return properties[key];
-
-			case "lockdiscovery:DAV:":
-				string strLocks;
-				bool[string] headerLocks;
-
-				if(DavStorage.locks.lockedParentResource(url).length > 0) {
-				auto list = DavStorage.locks[fullURL];
-					foreach(lock; list)
-						strLocks ~= lock.toString;
-				}
-
-			return new DavProp("DAV:", "lockdiscovery", strLocks);
-
-			 case "supportedlock:DAV:":
-				return new DavProp("<d:supportedlock xmlns:d=\"DAV:\">
-							            <d:lockentry>
-							              <d:lockscope><d:exclusive/></d:lockscope>
-							              <d:locktype><d:write/></d:locktype>
-							            </d:lockentry>
-							            <d:lockentry>
-							              <d:lockscope><d:shared/></d:lockscope>
-							              <d:locktype><d:write/></d:locktype>
-							            </d:lockentry>
-							          </d:supportedlock>");
-
-			case "displayname:DAV:":
-				return new DavProp("DAV:", "displayname", name);
-		}
+		return new DavProp();
 	}
 
 	void filterProps(DavProp parent, bool[string] props) {
@@ -491,26 +486,59 @@ abstract class DavResource : IDavResourceProperties {
 		if(name in DavStorage.resourcePropStorage[urlStr]) DavStorage.resourcePropStorage[urlStr].remove(name);
 	}
 
-	void remove() {
-		string strUrl = url.toString;
+	bool[string] getChildren() {
+		bool[string] list;
 
-		if(strUrl in DavStorage.resourcePropStorage)
-			DavStorage.resourcePropStorage.remove(strUrl);
+		writeln("getChildren: ", plugins);
+
+		foreach(plugin; plugins) {
+			auto tmpList = plugin.getChildren(url);
+
+			foreach(string key, bool value; tmpList)
+				list[key] = value;
+		}
+
+		return list;
 	}
 
-	HTTPStatus copy(URL destinationURL, bool overwrite = false) {
-		DavStorage.resourcePropStorage[destinationURL.toString] = DavStorage.resourcePropStorage[url.toString];
+	void setContent(const ubyte[] content) {
+		foreach(plugin; plugins)
+			if(plugin.canSetContent(url)) {
+				plugin.setContent(url, content);
 
-		return HTTPStatus.ok;
+				return;
+			}
+
+		throw new DavException(HTTPStatus.methodNotAllowed, "No plugin support.");
 	}
 
-	abstract {
-		bool[string] getChildren();
-		void setContent(const ubyte[] content);
-		void setContent(InputStream content, ulong size);
-		@property {
-			InputStream stream();
-			bool isCollection();
+	void setContent(InputStream content, ulong size) {
+
+		foreach(plugin; plugins)
+			if(plugin.canSetContent(url)) {
+				plugin.setContent(url, content, size);
+
+				return;
+			}
+
+		throw new DavException(HTTPStatus.methodNotAllowed, "No plugin support.");
+	}
+
+	@property {
+		InputStream stream() {
+			foreach(plugin; plugins)
+			if(plugin.canGetStream(url))
+				return plugin.stream(url);
+
+			throw new DavException(HTTPStatus.methodNotAllowed, "No plugin support.");
+		}
+
+		pure nothrow bool isCollection() {
+			foreach(type; resourceType)
+				if(type == "collection:DAV:")
+					return true;
+
+			return false;
 		}
 	}
 }

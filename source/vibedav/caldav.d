@@ -415,7 +415,7 @@ private bool matchPluginUrl(URL url, string username) {
 	return false;
 }
 
-class CalDavResourcePlugin : IDavResourcePlugin, ICalDavProperties, IDavReportSetProperties {
+class CalDavResourcePlugin : BaseDavResourcePlugin, ICalDavProperties, IDavReportSetProperties {
 
 	string[] calendarHomeSet(DavResource resource) {
 		if(matchPluginUrl(resource.url, resource.username))
@@ -452,70 +452,29 @@ class CalDavResourcePlugin : IDavResourcePlugin, ICalDavProperties, IDavReportSe
 		return [];
 	}
 
-	bool canSetContent(DavResource resource) {
-		return false;
-	}
+	override {
+		bool canGetProperty(DavResource resource, string name) {
+			if(matchPluginUrl(resource.url, resource.username) && hasDavInterfaceProperty!ICalDavProperties(name))
+				return true;
 
-	bool canGetStream(DavResource resource) {
-		return false;
-	}
+			if(matchPluginUrl(resource.url, resource.username) && hasDavInterfaceProperty!IDavReportSetProperties(name))
+				return true;
 
-	bool canSetProperty(DavResource resource, string name) {
-		return false;
-	}
+			return false;
+		}
 
-	bool canRemoveProperty(DavResource resource, string name) {
-		return false;
-	}
+		DavProp property(DavResource resource, string name) {
+			if(!matchPluginUrl(resource.url, resource.username))
+				throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
 
-	bool canGetProperty(DavResource resource, string name) {
-		if(matchPluginUrl(resource.url, resource.username) && hasDavInterfaceProperty!ICalDavProperties(name))
-			return true;
+			if(hasDavInterfaceProperty!ICalDavProperties(name))
+				return getDavInterfaceProperty!ICalDavProperties(name, this, resource);
 
-		if(matchPluginUrl(resource.url, resource.username) && hasDavInterfaceProperty!IDavReportSetProperties(name))
-			return true;
+			if(hasDavInterfaceProperty!IDavReportSetProperties(name))
+				return getDavInterfaceProperty!IDavReportSetProperties(name, this, resource);
 
-		return false;
-	}
-
-	bool[string] getChildren(DavResource resource) {
-		bool[string] list;
-		return list;
-	}
-
-	void setContent(DavResource resource, const ubyte[] content) {
-		throw new DavException(HTTPStatus.internalServerError, "Can't set content.");
-	}
-
-	void setContent(DavResource resource, InputStream content, ulong size) {
-		throw new DavException(HTTPStatus.internalServerError, "Can't set content.");
-	}
-
-	InputStream stream(DavResource resource) {
-		throw new DavException(HTTPStatus.internalServerError, "Can't get stream.");
-	}
-
-	void copyPropertiesTo(URL source, URL destination) { }
-
-	DavProp property(DavResource resource, string name) {
-		if(!matchPluginUrl(resource.url, resource.username))
 			throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
-
-		if(hasDavInterfaceProperty!ICalDavProperties(name))
-			return getDavInterfaceProperty!ICalDavProperties(name, this, resource);
-
-		if(hasDavInterfaceProperty!IDavReportSetProperties(name))
-			return getDavInterfaceProperty!IDavReportSetProperties(name, this, resource);
-
-		throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
-	}
-
-	HTTPStatus setProperty(DavResource resource, string name, DavProp prop) {
-		throw new DavException(HTTPStatus.internalServerError, "Can't set property.");
-	}
-
-	HTTPStatus removeProperty(DavResource resource, string name) {
-		throw new DavException(HTTPStatus.internalServerError, "Can't remove property.");
+		}
 	}
 
 	@property {
@@ -525,56 +484,104 @@ class CalDavResourcePlugin : IDavResourcePlugin, ICalDavProperties, IDavReportSe
 	}
 }
 
-class CalDavPlugin : IDavPlugin {
 
-	private IDav _dav;
+class CalDavCollectionPlugin : BaseDavResourcePlugin, ICalDavCollectionProperties {
 
-	this(IDav dav) {
-		_dav = dav;
+	string calendarDescription(DavResource resource) {
+		return resource.name;
 	}
 
-	bool exists(URL url, string username) {
-		return false;
+	TimeZone calendarTimezone(DavResource resource) {
+		TimeZone t;
+		return t;
 	}
 
-	bool canCreateCollection(URL url, string username) {
-		return false;
+	string[] supportedCalendarComponentSet(DavResource resource) {
+		return ["VEVENT", "VTODO", "VJOURNAL", "VFREEBUSY", "VTIMEZONE", "VALARM"];
 	}
 
-	bool canCreateResource(URL url, string username) {
-		return false;
+	string[string][] supportedCalendarData(DavResource resource) {
+		string[string][] list;
+
+		list ~= [["content-type": "text/calendar", "version": "2.0"]];
+
+		return list;
 	}
 
-	void removeResource(URL url, string username) {
-		throw new DavException(HTTPStatus.internalServerError, "Can't remove resource.");
+	ulong maxResourceSize(DavResource resource) {
+		return ulong.max;
 	}
 
-	DavResource getResource(URL url, string username) {
-		throw new DavException(HTTPStatus.internalServerError, "Can't get resource.");
+	SysTime minDateTime(DavResource resource) {
+		return SysTime.min;
 	}
 
-	DavResource createCollection(URL url, string username) {
-		throw new DavException(HTTPStatus.internalServerError, "Can't create collection.");
+	SysTime maxDateTime(DavResource resource) {
+		return SysTime.max;
 	}
 
-	DavResource createResource(URL url, string username) {
-		throw new DavException(HTTPStatus.internalServerError, "Can't create resource.");
+	ulong maxInstances(DavResource resource) {
+		return ulong.max;
 	}
 
-	void bindResourcePlugins(ref DavResource resource) {
-		resource.registerPlugin(new CalDavResourcePlugin);
+	ulong maxAttendeesPerInstance(DavResource resource) {
+		return ulong.max;
+	}
+
+	override {
+
+		bool canGetProperty(DavResource resource, string name) {
+			if(matchPluginUrl(resource.url, resource.username) && hasDavInterfaceProperty!ICalDavCollectionProperties(name))
+				return true;
+
+			return false;
+		}
+
+		DavProp property(DavResource resource, string name) {
+			if(!matchPluginUrl(resource.url, resource.username))
+				throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
+
+			if(hasDavInterfaceProperty!ICalDavCollectionProperties(name))
+				return getDavInterfaceProperty!ICalDavCollectionProperties(name, this, resource);
+
+			throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
+		}
 	}
 
 	@property {
-		IDav dav() {
-			return _dav;
+		string name() {
+			return "ResourceBasicProperties";
 		}
+	}
+}
+
+class CalDavPlugin : BaseDavPlugin {
+
+	this(IDav dav) {
+		super(dav);
+	}
+
+
+	override void bindResourcePlugins(DavResource resource) {
+
+		if(!matchPluginUrl(resource.url, resource.username))
+			return;
+
+		resource.registerPlugin(new CalDavResourcePlugin);
+
+		if(resource.isCollection && resource.url.path.toString.stripSlashes != "principals/" ~ resource.username ~ "/calendars") {
+			resource.resourceType ~= "calendar:urn:ietf:params:xml:ns:caldav";
+			resource.registerPlugin(new CalDavCollectionPlugin);
+		}
+	}
+
+	@property {
 
 		string name() {
 			return "CalDavPlugin";
 		}
 
-		string[] support(URL url, string username) {
+		override string[] support(URL url, string username) {
 			if(matchPluginUrl(url, username))
 				return [ "calendar-access" ];
 

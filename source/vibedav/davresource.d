@@ -288,6 +288,9 @@ interface IDavResourceProperties {
 	@ResourceProperty("resourcetype", "DAV:")
 	@ResourcePropertyTagName()
 	string[] resourceType(DavResource resource);
+
+	@ResourceProperty("displayname", "DAV:")
+	string displayName(DavResource resource);
 }
 
 interface IDavResourceExtendedProperties {
@@ -324,13 +327,68 @@ interface IDavResourcePlugin {
 	}
 }
 
+
+abstract class BaseDavResourcePlugin : IDavResourcePlugin {
+
+	bool canSetContent(DavResource resource) {
+		return false;
+	}
+
+	bool canGetStream(DavResource resource) {
+		return false;
+	}
+
+	bool canSetProperty(DavResource resource, string name) {
+		return false;
+	}
+
+	bool canRemoveProperty(DavResource resource, string name) {
+		return false;
+	}
+
+	bool canGetProperty(DavResource resource, string name) {
+		return false;
+	}
+
+	bool[string] getChildren(DavResource resource) {
+		bool[string] list;
+		return list;
+	}
+
+	void setContent(DavResource resource, const ubyte[] content) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't set content.");
+	}
+
+	void setContent(DavResource resource, InputStream content, ulong size) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't set content.");
+	}
+
+	InputStream stream(DavResource resource) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't get stream.");
+	}
+
+	void copyPropertiesTo(URL source, URL destination) { }
+
+	DavProp property(DavResource resource, string name) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
+	}
+
+	HTTPStatus setProperty(DavResource resource, string name, DavProp prop) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't set property.");
+	}
+
+	HTTPStatus removeProperty(DavResource resource, string name) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't remove property.");
+	}
+}
+
 interface IDavResourcePluginHub {
 	void registerPlugin(IDavResourcePlugin plugin);
 	bool hasPlugin(string name);
 }
 
 
-class ResourceBasicProperties : IDavResourcePlugin, IDavResourceProperties {
+class ResourceBasicProperties : BaseDavResourcePlugin, IDavResourceProperties {
 
 	SysTime creationDate(DavResource resource) {
 		return resource.creationDate;
@@ -356,63 +414,25 @@ class ResourceBasicProperties : IDavResourcePlugin, IDavResourceProperties {
 		return resource.resourceType;
 	}
 
-	bool canSetContent(DavResource resource) {
-		return false;
+	string displayName(DavResource resource) {
+		return resource.name;
 	}
 
-	bool canGetStream(DavResource resource) {
-		return false;
-	}
 
-	bool canSetProperty(DavResource resource, string name) {
-		return false;
-	}
+	override {
+		bool canGetProperty(DavResource resource, string name) {
+			if(hasDavInterfaceProperty!IDavResourceProperties(name))
+				return true;
 
-	bool canRemoveProperty(DavResource resource, string name) {
-		return false;
-	}
+			return false;
+		}
 
-	bool canGetProperty(DavResource resource, string name) {
-		if(hasDavInterfaceProperty!IDavResourceProperties(name))
-			return true;
+		DavProp property(DavResource resource, string name) {
+			if(canGetProperty(resource, name))
+				return getDavInterfaceProperty!IDavResourceProperties(name, this, resource);
 
-		return false;
-	}
-
-	bool[string] getChildren(DavResource resource) {
-		bool[string] list;
-		return list;
-	}
-
-	void setContent(DavResource resource, const ubyte[] content) {
-		throw new DavException(HTTPStatus.internalServerError, "Can't set content.");
-	}
-
-	void setContent(DavResource resource, InputStream content, ulong size) {
-		throw new DavException(HTTPStatus.internalServerError, "Can't set content.");
-	}
-
-	InputStream stream(DavResource resource) {
-		throw new DavException(HTTPStatus.internalServerError, "Can't get stream.");
-	}
-
-	void copyPropertiesTo(URL source, URL destination) {
-
-	}
-
-	DavProp property(DavResource resource, string name) {
-		if(canGetProperty(resource, name))
-			return getDavInterfaceProperty!IDavResourceProperties(name, this, resource);
-
-		throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
-	}
-
-	HTTPStatus setProperty(DavResource resource, string name, DavProp prop) {
-		throw new DavException(HTTPStatus.internalServerError, "Can't set property.");
-	}
-
-	HTTPStatus removeProperty(DavResource resource, string name) {
-		throw new DavException(HTTPStatus.internalServerError, "Can't remove property.");
+			throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
+		}
 	}
 
 	@property {
@@ -422,83 +442,60 @@ class ResourceBasicProperties : IDavResourcePlugin, IDavResourceProperties {
 	}
 }
 
-class ResourceCustomProperties : IDavResourcePlugin {
+class ResourceCustomProperties : BaseDavResourcePlugin {
 
 	private static DavProp[string][string] properties;
 
-	bool canSetContent(DavResource resource) {
-		return false;
-	}
+	override {
+		bool canGetProperty(DavResource resource, string name) {
+			string u = resource.url.toString;
 
-	bool canGetStream(DavResource resource) {
-		return false;
-	}
+			if(u !in properties)
+				return false;
 
-	bool canGetProperty(DavResource resource, string name) {
-		string u = resource.url.toString;
+			if(name !in properties[u])
+				return false;
 
-		if(u !in properties)
-			return false;
-
-		if(name !in properties[u])
-			return false;
-
-		return true;
-	}
-
-	bool canSetProperty(DavResource resource, string name) {
-		return true;
-	}
-
-	bool canRemoveProperty(DavResource resource, string name) {
-		return canGetProperty(resource, name);
-	}
-
-	bool[string] getChildren(DavResource resource) {
-		bool[string] list;
-		return list;
-	}
-
-	void setContent(DavResource resource, const(ubyte[]) content) {
-		throw new DavException(HTTPStatus.internalServerError, "Can't set content.");
-	}
-
-	void setContent(DavResource resource, InputStream content, ulong size) {
-		throw new DavException(HTTPStatus.internalServerError, "Can't set content.");
-	}
-
-	InputStream stream(DavResource resource) {
-		throw new DavException(HTTPStatus.internalServerError, "Can't get stream.");
-	}
-
-	void copyPropertiesTo(URL source, URL destination) {
-		if(source.toString in properties)
-			properties[destination.toString] = properties[source.toString];
-	}
-
-	DavProp property(DavResource resource, string name) {
-		if(canGetProperty(resource, name))
-			return properties[resource.url.toString][name];
-
-		throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
-	}
-
-	HTTPStatus setProperty(DavResource resource, string name, DavProp prop) {
-		if(resource.url.toString !in properties) {
-			DavProp[string] list;
-			properties[resource.url.toString] = list;
+			return true;
 		}
 
-		properties[resource.url.toString][name] = prop;
+		bool canSetProperty(DavResource resource, string name) {
+			return true;
+		}
 
-		return HTTPStatus.ok;
-	}
+		bool canRemoveProperty(DavResource resource, string name) {
+			return canGetProperty(resource, name);
+		}
 
-	HTTPStatus removeProperty(DavResource resource, string name) {
-		if(canGetProperty(resource, name))
-			properties[resource.url.toString].remove(name);
+		void copyPropertiesTo(URL source, URL destination) {
+			if(source.toString in properties)
+				properties[destination.toString] = properties[source.toString];
+		}
 
-		return HTTPStatus.notFound;
+		DavProp property(DavResource resource, string name) {
+			if(canGetProperty(resource, name))
+				return properties[resource.url.toString][name];
+
+			throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
+		}
+
+		HTTPStatus setProperty(DavResource resource, string name, DavProp prop) {
+			if(resource.url.toString !in properties) {
+				DavProp[string] list;
+				properties[resource.url.toString] = list;
+			}
+
+			properties[resource.url.toString][name] = prop;
+
+			return HTTPStatus.ok;
+		}
+
+		HTTPStatus removeProperty(DavResource resource, string name) {
+			if(canGetProperty(resource, name))
+				properties[resource.url.toString].remove(name);
+
+			return HTTPStatus.notFound;
+		}
 	}
 
 	@property {
@@ -520,6 +517,7 @@ class DavResource : IDavResourcePluginHub {
 	string contentType;
 	ulong contentLength;
 	string[] resourceType;
+	string name;
 
 	protected {
 		IDavResourcePlugin[] plugins;
@@ -581,9 +579,6 @@ class DavResource : IDavResourcePluginHub {
 	}
 
 	@property {
-		string name() {
-			return href.baseName;
-		}
 
 		string fullURL() {
 			return url.toString;

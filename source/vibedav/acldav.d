@@ -130,56 +130,24 @@ class ACLDavResourcePlugin : ACLDavProperties, IDavResourcePlugin {
 	}
 }
 
-class ACLDavPlugin : IDavPlugin {
+class ACLDavPlugin : BaseDavPlugin {
 
 	private IDav _dav;
 
 	this(IDav dav) {
-		_dav = dav;
+		super(dav);
 	}
 
-	bool exists(URL url, string username) {
-		return false;
-	}
-
-	bool canCreateCollection(URL url, string username) {
-		return false;
-	}
-
-	bool canCreateResource(URL url, string username) {
-		return false;
-	}
-
-	void removeResource(URL url, string username) {
-		throw new DavException(HTTPStatus.internalServerError, "Can't remove resource.");
-	}
-
-	DavResource getResource(URL url, string username) {
-		throw new DavException(HTTPStatus.internalServerError, "Can't get resource.");
-	}
-
-	DavResource createCollection(URL url, string username) {
-		throw new DavException(HTTPStatus.internalServerError, "Can't create collection.");
-	}
-
-	DavResource createResource(URL url, string username) {
-		throw new DavException(HTTPStatus.internalServerError, "Can't create resource.");
-	}
-
-	void bindResourcePlugins(ref DavResource resource) {
+	override void bindResourcePlugins(DavResource resource) {
 		resource.registerPlugin(new ACLDavResourcePlugin);
 	}
 
 	@property {
-		IDav dav() {
-			return _dav;
-		}
-
 		string name() {
 			return "ACLDavPlugin";
 		}
 
-		string[] support(URL url, string username) {
+		override string[] support(URL url, string username) {
 			if(matchPluginUrl(url))
 				return [ "access-control" ];
 

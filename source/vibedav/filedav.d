@@ -338,6 +338,7 @@ class FileDav : IDavPlugin {
 			resource.eTag = eTag(path);
 			resource.contentType = getMimeTypeForFile(path);
 			resource.contentLength = contentLength(path);
+			resource.name = baseName(path);
 
 			if(path.isDir)
 				resource.resourceType ~= "collection:DAV:";
@@ -407,7 +408,7 @@ class FileDav : IDavPlugin {
 		return getResource(url, username);
 	}
 
-	void bindResourcePlugins(ref DavResource resource) {
+	void bindResourcePlugins(DavResource resource) {
 		if(resource.isCollection)
 			resource.registerPlugin(new DirectoryResourcePlugin(baseUrlPath, basePath));
 		else

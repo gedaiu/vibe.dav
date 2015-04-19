@@ -67,7 +67,7 @@ interface IDavResourceAccess {
 	DavResource createCollection(URL url, string username);
 	DavResource createResource(URL url, string username);
 
-	void bindResourcePlugins(ref DavResource resource);
+	void bindResourcePlugins(DavResource resource);
 }
 
 interface IDavPlugin : IDavResourceAccess {
@@ -82,6 +82,55 @@ interface IDavPlugin : IDavResourceAccess {
 interface IDavPluginHub {
 	void registerPlugin(IDavPlugin plugin);
 	bool hasPlugin(string name);
+}
+
+
+abstract class BaseDavPlugin : IDavPlugin {
+	private IDav _dav;
+
+	this(IDav dav) {
+		_dav = dav;
+	}
+
+	bool exists(URL url, string username) {
+		return false;
+	}
+
+	bool canCreateCollection(URL url, string username) {
+		return false;
+	}
+
+	bool canCreateResource(URL url, string username) {
+		return false;
+	}
+
+	void removeResource(URL url, string username) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't remove resource.");
+	}
+
+	DavResource getResource(URL url, string username) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't get resource.");
+	}
+
+	DavResource createCollection(URL url, string username) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't create collection.");
+	}
+
+	DavResource createResource(URL url, string username) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't create resource.");
+	}
+
+	void bindResourcePlugins(DavResource resource) { }
+
+	@property {
+		IDav dav() {
+			return _dav;
+		}
+
+		string[] support(URL url, string username) {
+			return [];
+		}
+	}
 }
 
 interface IDav : IDavResourceAccess, IDavPluginHub {
@@ -235,6 +284,8 @@ class Dav : IDav {
 			depth--;
 		}
 
+		list ~= tmpList;
+
 		return list;
 	}
 
@@ -263,7 +314,7 @@ class Dav : IDav {
 	}
 
 
-	void bindResourcePlugins(ref DavResource resource) {
+	void bindResourcePlugins(DavResource resource) {
 		foreach(plugin; plugins)
 			plugin.bindResourcePlugins(resource);
 	}

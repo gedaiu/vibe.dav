@@ -73,3 +73,13 @@ auto router = new URLRouter;
 	...
 
 	listenHTTP(settings, router);
+
+
+
+## Future development
+
+* CardDav support
+* Move the logic from the DAV class to other plugins
+* Improve XML support (eg: change xml node format from "name:DAV:" to "{DAV:}name")
+* Add DB support
+* Add migration tools from https://github.com/Kozea/Radicale

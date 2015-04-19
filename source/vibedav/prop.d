@@ -305,7 +305,8 @@ class DavProp {
 
         foreach(ulong index, DavProp p; properties)
         {
-            result = dg(p.name, p);
+        	string name = p.tagName ~ ":" ~ p.namespace;
+            result = dg(name, p);
             if (result)
                 break;
         }

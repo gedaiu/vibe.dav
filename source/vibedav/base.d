@@ -37,7 +37,6 @@ import tested;
 class DavStorage {
 	static {
 		DavLockList locks;
-		DavProp[string] resourcePropStorage;
 	}
 }
 
@@ -184,7 +183,7 @@ class Dav : IDav {
 
 	bool hasPlugin(string name) {
 
-		foreach(plugin; plugins)
+		foreach_reverse(plugin; plugins)
 			if(plugin.name == name)
 				return true;
 
@@ -192,7 +191,7 @@ class Dav : IDav {
 	}
 
 	void removeResource(URL url, IDavUser user = null) {
-		foreach(plugin; plugins)
+		foreach_reverse(plugin; plugins)
 			if(plugin.exists(url))
 				return plugin.removeResource(url, user);
 
@@ -200,7 +199,7 @@ class Dav : IDav {
 	}
 
 	DavResource getResource(URL url, IDavUser user = null) {
-		foreach(plugin; plugins)
+		foreach_reverse(plugin; plugins)
 			if(plugin.exists(url))
 				return plugin.getResource(url, user);
 
@@ -211,7 +210,7 @@ class Dav : IDav {
 		DavResource[] list;
 		DavResource[] tmpList;
 
-		foreach(plugin; plugins)
+		foreach_reverse(plugin; plugins)
 			if(plugin.exists(url)) {
 				tmpList ~= plugin.getResource(url, user);
 				break;
@@ -239,7 +238,7 @@ class Dav : IDav {
 	}
 
 	DavResource createCollection(URL url) {
-		foreach(plugin; plugins)
+		foreach_reverse(plugin; plugins)
 			if(plugin.canCreateCollection(url))
 				return plugin.createCollection(url);
 
@@ -247,7 +246,7 @@ class Dav : IDav {
 	}
 
 	DavResource createResource(URL url) {
-		foreach(plugin; plugins)
+		foreach_reverse(plugin; plugins)
 			if(plugin.canCreateResource(url))
 				return plugin.createResource(url);
 
@@ -255,7 +254,7 @@ class Dav : IDav {
 	}
 
 	bool exists(URL url) {
-		foreach(plugin; plugins)
+		foreach_reverse(plugin; plugins)
 			if(plugin.exists(url))
 				return true;
 
@@ -263,7 +262,7 @@ class Dav : IDav {
 	}
 
 	bool canCreateCollection(URL url) {
-		foreach(plugin; plugins)
+		foreach_reverse(plugin; plugins)
 			if(plugin.canCreateCollection(url))
 				return true;
 
@@ -271,7 +270,7 @@ class Dav : IDav {
 	}
 
 	bool canCreateResource(URL url) {
-		foreach(plugin; plugins)
+		foreach_reverse(plugin; plugins)
 			if(plugin.canCreateResource(url))
 				return true;
 
@@ -285,7 +284,7 @@ class Dav : IDav {
 
 		string[] support;
 
-		foreach(plugin; plugins)
+		foreach_reverse(plugin; plugins)
 			support ~= plugin.support;
 
 		auto allow = "OPTIONS, GET, HEAD, DELETE, PROPFIND, PUT, PROPPATCH, COPY, MOVE, LOCK, UNLOCK, REPORT";
@@ -302,6 +301,9 @@ class Dav : IDav {
 		bool[string] requestedProperties = propList(request.content);
 		DavResource[] list;
 		IDavUser user;
+
+		if(!exists(request.url))
+			throw new DavException(HTTPStatus.notFound, "Resource does not exist.");
 
 		if(userCollection !is null)
 			user = userCollection.GetDavUser(request.username);
@@ -508,6 +510,8 @@ class Dav : IDav {
 			} else {
 				destination.setContent(source.stream, source.contentLength);
 			}
+
+			source.copyPropertiesTo(destination.url);
 		}
 
 		DavResource source = getResource(request.url);

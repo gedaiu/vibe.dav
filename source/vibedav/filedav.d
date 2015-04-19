@@ -109,8 +109,6 @@ bool[string] getFolderContent(string format = "*")(string path, Path rootPath, P
 	enforce(strRootPath.length <= path.length);
 	enforce(strRootPath == path[0..strRootPath.length]);
 
-	writeln("getFolderContent: ", path);
-
 	auto fileList = dirEntries(path, format, SpanMode.shallow);
 
 	foreach(file; fileList) {
@@ -168,6 +166,14 @@ class DirectoryResourcePlugin : IDavResourcePlugin {
 		bool canGetProperty(URL url, string name) {
 			return false;
 		}
+
+		bool canSetProperty(URL url, string name) {
+			return false;
+		}
+
+		bool canRemoveProperty(URL url, string name) {
+			return false;
+		}
 	}
 
 	bool[string] getChildren(URL url) {
@@ -187,8 +193,20 @@ class DirectoryResourcePlugin : IDavResourcePlugin {
 		throw new DavException(HTTPStatus.internalServerError, "Can't get directory stream.");
 	}
 
+	void copyPropertiesTo(URL source, URL destination) {
+
+	}
+
 	DavProp property(DavResource resource, string name) {
 		throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
+	}
+
+	HTTPStatus setProperty(URL url, string name, DavProp prop) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't set property.");
+	}
+
+	HTTPStatus removeProperty(URL url, string name) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't remove property.");
 	}
 
 	pure nothrow @property {
@@ -227,6 +245,14 @@ class FileResourcePlugin : IDavResourcePlugin {
 		return false;
 	}
 
+	bool canSetProperty(URL url, string name) {
+		return false;
+	}
+
+	bool canRemoveProperty(URL url, string name) {
+		return false;
+	}
+
 	bool[string] getChildren(URL url) {
 		bool[string] list;
 		return list;
@@ -252,6 +278,7 @@ class FileResourcePlugin : IDavResourcePlugin {
 		}
 
 		tmpFile.flush;
+
 		std.file.copy(tmpPath, nativePath);
 		std.file.remove(tmpPath);
 	}
@@ -263,6 +290,18 @@ class FileResourcePlugin : IDavResourcePlugin {
 
 	DavProp property(DavResource resource, string name) {
 		throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
+	}
+
+	void copyPropertiesTo(URL source, URL destination) {
+
+	}
+
+	HTTPStatus setProperty(URL url, string name, DavProp prop) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't set property.");
+	}
+
+	HTTPStatus removeProperty(URL url, string name) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't remove property.");
 	}
 
 	pure nothrow @property {
@@ -303,6 +342,7 @@ class FileDav : IDavPlugin {
 			} else
 				resource.registerPlugin(new FileResourcePlugin(baseUrlPath, basePath));
 
+			resource.registerPlugin(new ResourceCustomProperties);
 			resource.registerPlugin(new ResourceBasicProperties);
 		}
 	}

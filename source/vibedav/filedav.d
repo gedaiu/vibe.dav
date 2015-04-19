@@ -155,41 +155,41 @@ class DirectoryResourcePlugin : IDavResourcePlugin {
 	}
 
 	pure nothrow {
-		bool canSetContent(URL url) {
+		bool canSetContent(DavResource resource) {
 			return false;
 		}
 
-		bool canGetStream(URL url) {
+		bool canGetStream(DavResource resource) {
 			return false;
 		}
 
-		bool canGetProperty(URL url, string name) {
+		bool canGetProperty(DavResource resource, string name) {
 			return false;
 		}
 
-		bool canSetProperty(URL url, string name) {
+		bool canSetProperty(DavResource resource, string name) {
 			return false;
 		}
 
-		bool canRemoveProperty(URL url, string name) {
+		bool canRemoveProperty(DavResource resource, string name) {
 			return false;
 		}
 	}
 
-	bool[string] getChildren(URL url) {
-		auto nativePath = filePath(url).toString;
+	bool[string] getChildren(DavResource resource) {
+		auto nativePath = filePath(resource.url).toString;
 		return getFolderContent!"*"(nativePath, basePath, baseUrlPath);
 	}
 
-	void setContent(URL url, const ubyte[] content) {
+	void setContent(DavResource resource, const ubyte[] content) {
 		throw new DavException(HTTPStatus.internalServerError, "Can't set directory stream.");
 	}
 
-	void setContent(URL url, InputStream content, ulong size) {
+	void setContent(DavResource resource, InputStream content, ulong size) {
 		throw new DavException(HTTPStatus.internalServerError, "Can't set directory stream.");
 	}
 
-	InputStream stream(URL url) {
+	InputStream stream(DavResource resource) {
 		throw new DavException(HTTPStatus.internalServerError, "Can't get directory stream.");
 	}
 
@@ -201,11 +201,11 @@ class DirectoryResourcePlugin : IDavResourcePlugin {
 		throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
 	}
 
-	HTTPStatus setProperty(URL url, string name, DavProp prop) {
+	HTTPStatus setProperty(DavResource resource, string name, DavProp prop) {
 		throw new DavException(HTTPStatus.internalServerError, "Can't set property.");
 	}
 
-	HTTPStatus removeProperty(URL url, string name) {
+	HTTPStatus removeProperty(DavResource resource, string name) {
 		throw new DavException(HTTPStatus.internalServerError, "Can't remove property.");
 	}
 
@@ -231,40 +231,41 @@ class FileResourcePlugin : IDavResourcePlugin {
 		return getFilePath(baseUrlPath, basePath, url);
 	}
 
-	bool canSetContent(URL url) {
-		auto filePath = filePath(url).toString;
+	bool canSetContent(DavResource resource) {
+		auto filePath = filePath(resource.url).toString;
 		return filePath.exists;
 	}
 
 
-	bool canGetStream(URL url) {
-		return canSetContent(url);
+	bool canGetStream(DavResource resource) {
+		return canSetContent(resource);
 	}
 
-	bool canGetProperty(URL url, string name) {
+	bool canGetProperty(DavResource resource, string name) {
 		return false;
 	}
 
-	bool canSetProperty(URL url, string name) {
+	bool canSetProperty(DavResource resource, string name) {
 		return false;
 	}
 
-	bool canRemoveProperty(URL url, string name) {
+	bool canRemoveProperty(DavResource resource, string name) {
 		return false;
 	}
 
-	bool[string] getChildren(URL url) {
+	bool[string] getChildren(DavResource resource) {
 		bool[string] list;
 		return list;
 	}
 
-	void setContent(URL url, const ubyte[] content) {
-		auto filePath = filePath(url).toString;
+	void setContent(DavResource resource, const ubyte[] content) {
+		auto filePath = filePath(resource.url).toString;
 		std.stdio.write(filePath, content);
 	}
 
-	void setContent(URL url, InputStream content, ulong size) {
-		auto nativePath = filePath(url).toString;
+	void setContent(DavResource resource, InputStream content, ulong size) {
+
+		auto nativePath = filePath(resource.url).toString;
 
 		auto tmpPath = nativePath ~ ".tmp";
 		auto tmpFile = File(tmpPath, "w");
@@ -279,12 +280,14 @@ class FileResourcePlugin : IDavResourcePlugin {
 
 		tmpFile.flush;
 
+		writeln("setContent: ", tmpPath, " ", nativePath);
+
 		std.file.copy(tmpPath, nativePath);
 		std.file.remove(tmpPath);
 	}
 
-	InputStream stream(URL url) {
-		auto nativePath = filePath(url).toString;
+	InputStream stream(DavResource resource) {
+		auto nativePath = filePath(resource.url).toString;
 		return nativePath.toStream;
 	}
 
@@ -296,11 +299,11 @@ class FileResourcePlugin : IDavResourcePlugin {
 
 	}
 
-	HTTPStatus setProperty(URL url, string name, DavProp prop) {
+	HTTPStatus setProperty(DavResource resource, string name, DavProp prop) {
 		throw new DavException(HTTPStatus.internalServerError, "Can't set property.");
 	}
 
-	HTTPStatus removeProperty(URL url, string name) {
+	HTTPStatus removeProperty(DavResource resource, string name) {
 		throw new DavException(HTTPStatus.internalServerError, "Can't remove property.");
 	}
 
@@ -336,41 +339,31 @@ class FileDav : IDavPlugin {
 			resource.contentType = getMimeTypeForFile(path);
 			resource.contentLength = contentLength(path);
 
-			if(path.isDir) {
+			if(path.isDir)
 				resource.resourceType ~= "collection:DAV:";
-				resource.registerPlugin(new DirectoryResourcePlugin(baseUrlPath, basePath));
-			} else
-				resource.registerPlugin(new FileResourcePlugin(baseUrlPath, basePath));
-
-			resource.registerPlugin(new ResourceCustomProperties);
-			resource.registerPlugin(new ResourceBasicProperties);
 		}
-	}
-
-	string[] support() {
-		return ["1", "2", "3"];
 	}
 
 	Path filePath(URL url) {
 		return getFilePath(baseUrlPath, basePath, url);
 	}
 
-	bool exists(URL url) {
+	bool exists(URL url, string username) {
 		auto filePath = filePath(url);
 
 		return filePath.toString.exists;
 	}
 
-	bool canCreateResource(URL url) {
-		return !exists(url);
+	bool canCreateResource(URL url, string username) {
+		return !exists(url, username);
 	}
 
-	bool canCreateCollection(URL url) {
-		return !exists(url);
+	bool canCreateCollection(URL url, string username) {
+		return !exists(url, username);
 	}
 
-	void removeResource(URL url, IDavUser user = null) {
-		if(!exists(url))
+	void removeResource(URL url, string username) {
+		if(!exists(url, username))
 			throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
 
 		auto filePath = filePath(url).toString;
@@ -382,27 +375,28 @@ class FileDav : IDavPlugin {
 
 	}
 
-	DavResource getResource(URL url, IDavUser user = null) {
-		if(!exists(url))
+	DavResource getResource(URL url, string username) {
+		if(!exists(url, username))
 			throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
 
 		auto filePath = filePath(url);
 
 		DavResource resource = new DavResource(_dav, url);
+		resource.username = username;
 		setResourceProperties(resource);
 
 		return resource;
 	}
 
-	DavResource createResource(URL url) {
+	DavResource createResource(URL url, string username) {
 		auto filePath = filePath(url).toString;
 
 		File(filePath, "w");
 
-		return getResource(url);
+		return getResource(url, username);
 	}
 
-	DavResource createCollection(URL url) {
+	DavResource createCollection(URL url, string username) {
 		auto filePath = filePath(url);
 
 		if(filePath.toString.exists)
@@ -410,7 +404,17 @@ class FileDav : IDavPlugin {
 
 		filePath.toString.mkdirRecurse;
 
-		return getResource(url);
+		return getResource(url, username);
+	}
+
+	void bindResourcePlugins(ref DavResource resource) {
+		if(resource.isCollection)
+			resource.registerPlugin(new DirectoryResourcePlugin(baseUrlPath, basePath));
+		else
+			resource.registerPlugin(new FileResourcePlugin(baseUrlPath, basePath));
+
+		resource.registerPlugin(new ResourceCustomProperties);
+		resource.registerPlugin(new ResourceBasicProperties);
 	}
 
 	@property {
@@ -421,18 +425,20 @@ class FileDav : IDavPlugin {
 		IDav dav() {
 			return _dav;
 		}
+
+		string[] support(URL url, string username) {
+			return ["1", "2", "3"];
+		}
 	}
 }
 
-IDav serveFileDav(URLRouter router, string rootUrl, string rootPath, IDavUserCollection userCollection = null) {
+IDav serveFileDav(URLRouter router, string rootUrl, string rootPath) {
 	rootUrl = rootUrl.stripSlashes;
 	rootPath = rootPath.stripSlashes;
 
 	auto dav = new Dav(rootUrl);
 	auto fileDav = new FileDav(dav, Path(rootUrl), Path(rootPath));
 	dav.registerPlugin(fileDav);
-
-	dav.userCollection = userCollection;
 
 	if(rootUrl != "") rootUrl = "/"~rootUrl~"/";
 

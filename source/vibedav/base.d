@@ -10,7 +10,6 @@ public import vibedav.prop;
 public import vibedav.ifheader;
 public import vibedav.locks;
 public import vibedav.http;
-public import vibedav.user;
 public import vibedav.davresource;
 
 import vibe.core.log;
@@ -18,9 +17,6 @@ import vibe.core.file;
 import vibe.inet.mimetypes;
 import vibe.inet.message;
 import vibe.http.server;
-import vibe.http.router : URLRouter;
-import vibe.stream.operations;
-import vibe.internal.meta.uda;
 
 import std.conv : to;
 import std.algorithm;
@@ -62,14 +58,16 @@ class DavException : Exception {
 }
 
 interface IDavResourceAccess {
-	bool exists(URL url);
-	bool canCreateCollection(URL url);
-	bool canCreateResource(URL url);
+	bool exists(URL url, string username);
+	bool canCreateCollection(URL url, string username);
+	bool canCreateResource(URL url, string username);
 
-	void removeResource(URL url, IDavUser user = null);
-	DavResource getResource(URL url, IDavUser user = null);
-	DavResource createCollection(URL url);
-	DavResource createResource(URL url);
+	void removeResource(URL url, string username);
+	DavResource getResource(URL url, string username);
+	DavResource createCollection(URL url, string username);
+	DavResource createResource(URL url, string username);
+
+	void bindResourcePlugins(ref DavResource resource);
 }
 
 interface IDavPlugin : IDavResourceAccess {
@@ -77,7 +75,7 @@ interface IDavPlugin : IDavResourceAccess {
 		IDav dav();
 		string name();
 
-		string[] support();
+		string[] support(URL url, string username);
 	}
 }
 
@@ -111,8 +109,6 @@ class Dav : IDav {
 		IDavPlugin[] plugins;
 	}
 
-	IDavUserCollection userCollection;
-
 	@property
 	Path rootUrl() {
 		return _rootUrl;
@@ -125,14 +121,18 @@ class Dav : IDav {
 	}
 
 	protected {
-		DavResource getOrCreateResource(URL url, out int status) {
+		DavResource getOrCreateResource(URL url, string username, out int status) {
 			DavResource resource;
 
-			if(exists(url)) {
-				resource = getResource(url);
+			if(exists(url, username)) {
+				resource = getResource(url, username);
 				status = HTTPStatus.ok;
 			} else {
-				resource = createResource(url);
+
+				if(!exists(url.parentURL, username))
+					throw new DavException(HTTPStatus.conflict, "A resource cannot be created at the destination until one or more intermediate collections have been created.");
+
+				resource = createResource(url, username);
 				status = HTTPStatus.created;
 			}
 
@@ -190,102 +190,117 @@ class Dav : IDav {
 		return false;
 	}
 
-	void removeResource(URL url, IDavUser user = null) {
+	void removeResource(URL url, string username) {
 		foreach_reverse(plugin; plugins)
-			if(plugin.exists(url))
-				return plugin.removeResource(url, user);
+			if(plugin.exists(url, username))
+				return plugin.removeResource(url, username);
 
 		throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
 	}
 
-	DavResource getResource(URL url, IDavUser user = null) {
+	DavResource getResource(URL url, string username) {
 		foreach_reverse(plugin; plugins)
-			if(plugin.exists(url))
-				return plugin.getResource(url, user);
+			if(plugin.exists(url, username)) {
+				auto res = plugin.getResource(url, username);
+				bindResourcePlugins(res);
+
+				return res;
+			}
 
 		throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
 	}
 
-	DavResource[] getResources(URL url, ulong depth, IDavUser user = null) {
+	DavResource[] getResources(URL url, ulong depth, string username) {
 		DavResource[] list;
 		DavResource[] tmpList;
 
-		foreach_reverse(plugin; plugins)
-			if(plugin.exists(url)) {
-				tmpList ~= plugin.getResource(url, user);
-				break;
-			}
+		tmpList ~= getResource(url, username);
 
 		if(depth == 0)
 			list ~= tmpList;
 
 		while(tmpList.length > 0 && depth > 0) {
+			auto oldLen = tmpList.length;
 
 			foreach(resource; tmpList) {
 				bool[string] childList = resource.getChildren();
 
 				foreach(string key, bool val; childList) {
-					tmpList ~= getResource(URL("http://a/" ~ key), user);
+					tmpList ~= getResource(URL("http://a/" ~ key), username);
 				}
 			}
 
-			list ~= tmpList;
-			tmpList = [];
+			list ~= tmpList[0..oldLen];
+			tmpList = tmpList[oldLen..$];
 			depth--;
 		}
 
 		return list;
 	}
 
-	DavResource createCollection(URL url) {
+	DavResource createCollection(URL url, string username) {
 		foreach_reverse(plugin; plugins)
-			if(plugin.canCreateCollection(url))
-				return plugin.createCollection(url);
+			if(plugin.canCreateCollection(url, username)) {
+				auto res = plugin.createCollection(url, username);
+				bindResourcePlugins(res);
+
+				return res;
+			}
 
 		throw new DavException(HTTPStatus.methodNotAllowed, "No plugin available.");
 	}
 
-	DavResource createResource(URL url) {
+	DavResource createResource(URL url, string username) {
 		foreach_reverse(plugin; plugins)
-			if(plugin.canCreateResource(url))
-				return plugin.createResource(url);
+			if(plugin.canCreateResource(url, username)) {
+				auto res = plugin.createResource(url, username);
+				bindResourcePlugins(res);
+
+				return res;
+			}
 
 		throw new DavException(HTTPStatus.methodNotAllowed, "No plugin available.");
 	}
 
-	bool exists(URL url) {
+
+	void bindResourcePlugins(ref DavResource resource) {
+		foreach(plugin; plugins)
+			plugin.bindResourcePlugins(resource);
+	}
+
+	bool exists(URL url, string username) {
 		foreach_reverse(plugin; plugins)
-			if(plugin.exists(url))
+			if(plugin.exists(url, username))
 				return true;
 
 		return false;
 	}
 
-	bool canCreateCollection(URL url) {
+	bool canCreateCollection(URL url, string username) {
 		foreach_reverse(plugin; plugins)
-			if(plugin.canCreateCollection(url))
+			if(plugin.canCreateCollection(url, username))
 				return true;
 
 		return false;
 	}
 
-	bool canCreateResource(URL url) {
+	bool canCreateResource(URL url, string username) {
 		foreach_reverse(plugin; plugins)
-			if(plugin.canCreateResource(url))
+			if(plugin.canCreateResource(url, username))
 				return true;
 
 		return false;
 	}
 
 	void options(DavRequest request, DavResponse response) {
-		DavResource resource = getResource(request.url);
+		DavResource resource = getResource(request.url, request.username);
 
 		string path = request.path;
 
 		string[] support;
 
 		foreach_reverse(plugin; plugins)
-			support ~= plugin.support;
+			support ~= plugin.support(request.url, request.username);
 
 		auto allow = "OPTIONS, GET, HEAD, DELETE, PROPFIND, PUT, PROPPATCH, COPY, MOVE, LOCK, UNLOCK, REPORT";
 
@@ -300,15 +315,11 @@ class Dav : IDav {
 	void propfind(DavRequest request, DavResponse response) {
 		bool[string] requestedProperties = propList(request.content);
 		DavResource[] list;
-		IDavUser user;
 
-		if(!exists(request.url))
+		if(!exists(request.url, request.username))
 			throw new DavException(HTTPStatus.notFound, "Resource does not exist.");
 
-		if(userCollection !is null)
-			user = userCollection.GetDavUser(request.username);
-
-		list = getResources(request.url, request.depth, user);
+		list = getResources(request.url, request.depth, request.username);
 
 		response.setPropContent(list, requestedProperties);
 
@@ -320,7 +331,7 @@ class Dav : IDav {
 
 		DavLockInfo currentLock;
 
-		auto resource = getOrCreateResource(request.url, response.statusCode);
+		auto resource = getOrCreateResource(request.url, request.username, response.statusCode);
 
 		if(request.contentLength != 0) {
 			currentLock = DavLockInfo.fromXML(request.content, resource);
@@ -356,7 +367,7 @@ class Dav : IDav {
 	}
 
 	void unlock(DavRequest request, DavResponse response) {
-		auto resource = getResource(request.url);
+		auto resource = getResource(request.url, request.username);
 
 		DavStorage.locks.remove(resource, request.lockToken);
 
@@ -365,7 +376,7 @@ class Dav : IDav {
 	}
 
 	void get(DavRequest request, DavResponse response) {
-		DavResource resource = getResource(request.url);
+		DavResource resource = getResource(request.url, request.username);
 
 		response["Etag"] = "\"" ~ resource.eTag ~ "\"";
 		response["Last-Modified"] = toRFC822DateTimeString(resource.lastModified);
@@ -383,7 +394,7 @@ class Dav : IDav {
 	}
 
 	void head(DavRequest request, DavResponse response) {
-		DavResource resource = getResource(request.url);
+		DavResource resource = getResource(request.url, request.username);
 
 		response["Etag"] = "\"" ~ resource.eTag ~ "\"";
 		response["Last-Modified"] = toRFC822DateTimeString(resource.lastModified);
@@ -401,7 +412,7 @@ class Dav : IDav {
 	}
 
 	void put(DavRequest request, DavResponse response) {
-		DavResource resource = getOrCreateResource(request.url, response.statusCode);
+		DavResource resource = getOrCreateResource(request.url, request.username, response.statusCode);
 		DavStorage.locks.check(request.url, request.ifCondition);
 
 		resource.setContent(request.stream, request.contentLength);
@@ -418,7 +429,7 @@ class Dav : IDav {
 		response.statusCode = HTTPStatus.ok;
 
 		DavStorage.locks.check(request.url, ifHeader);
-		DavResource resource = getResource(request.url);
+		DavResource resource = getResource(request.url, request.username);
 
 		auto xmlString = resource.propPatch(request.content);
 
@@ -432,13 +443,13 @@ class Dav : IDav {
 		if(request.contentLength > 0)
 			throw new DavException(HTTPStatus.unsupportedMediaType, "Body must be empty");
 
-		if(!exists(request.url.parentURL))
+		if(!exists(request.url.parentURL, request.username))
 			throw new DavException(HTTPStatus.conflict, "Missing parent");
 
 		DavStorage.locks.check(request.url, ifHeader);
 
 		response.statusCode = HTTPStatus.created;
-		createCollection(request.url);
+		createCollection(request.url, request.username);
 		response.flush;
 	}
 
@@ -451,19 +462,19 @@ class Dav : IDav {
 		if(url.anchor != "" || request.requestUrl.indexOf("#") != -1)
 			throw new DavException(HTTPStatus.conflict, "Missing parent");
 
-		if(!exists(url))
+		if(!exists(url, request.username))
 			throw new DavException(HTTPStatus.notFound, "Not found.");
 
 		DavStorage.locks.check(url, ifHeader);
 
-		removeResource(url);
+		removeResource(url, request.username);
 
 		response.flush;
 	}
 
 	void move(DavRequest request, DavResponse response) {
 		auto ifHeader = request.ifCondition;
-		auto resource = getResource(request.url);
+		auto resource = getResource(request.url, request.username);
 
 		DavStorage.locks.check(request.url, ifHeader);
 		DavStorage.locks.check(request.destination, ifHeader);
@@ -475,10 +486,7 @@ class Dav : IDav {
 	}
 
 	void copy(DavRequest request, DavResponse response) {
-		IDavUser user;
-
-		if(request.username !is null)
-			user = userCollection.GetDavUser(request.username);
+		string username = request.username;
 
 		URL getDestinationUrl(DavResource source) {
 			auto sourceUrl = source.url;
@@ -494,16 +502,16 @@ class Dav : IDav {
 
 		void localCopy(DavResource source, DavResource destination) {
 			if(source.isCollection) {
-				auto list = getResources(request.url, DavDepth.infinity, user);
+				auto list = getResources(request.url, DavDepth.infinity, username);
 
 				foreach(child; list) {
 					auto destinationUrl = getDestinationUrl(child);
 
-					if(child.isCollection && !exists(destinationUrl))
-						createCollection(getDestinationUrl(child));
+					if(child.isCollection && !exists(destinationUrl, username))
+						createCollection(getDestinationUrl(child), username);
 					else if(!child.isCollection) {
 						HTTPStatus statusCode;
-						DavResource destinationChild = getOrCreateResource(getDestinationUrl(child), statusCode);
+						DavResource destinationChild = getOrCreateResource(getDestinationUrl(child), username, statusCode);
 						destinationChild.setContent(child.stream, child.contentLength);
 					}
 				}
@@ -514,22 +522,21 @@ class Dav : IDav {
 			source.copyPropertiesTo(destination.url);
 		}
 
-		DavResource source = getResource(request.url);
+		DavResource source = getResource(request.url, username);
 		DavResource destination;
 		HTTPStatus destinationStatus;
 
 		DavStorage.locks.check(request.destination, request.ifCondition);
 
-		if(!exists(request.destination.parentURL))
+		if(!exists(request.destination.parentURL, username))
 			throw new DavException(HTTPStatus.conflict, "Conflict. `" ~ request.destination.parentURL.toString ~ "` does not exist.");
 
-		if(!request.overwrite && exists(request.destination))
+		if(!request.overwrite && exists(request.destination, username))
 			throw new DavException(HTTPStatus.preconditionFailed, "Destination already exists.");
 
 		response.statusCode = HTTPStatus.created;
-		if(exists(request.destination)) {
-			destination = getResource(request.destination);
-		}
+		if(exists(request.destination, username))
+			destination = getResource(request.destination, username);
 
 		response.statusCode = HTTPStatus.created;
 
@@ -543,9 +550,9 @@ class Dav : IDav {
 
 		if(destination is null) {
 			if(source.isCollection)
-				destination = createCollection(destinationUrl);
+				destination = createCollection(destinationUrl, username);
 			else
-				destination = createResource(destinationUrl);
+				destination = createResource(destinationUrl, username);
 		}
 
 		localCopy(source, destination);
@@ -609,7 +616,7 @@ HTTPServerRequestDelegate serveDav(T : IDav)(T dav) {
 		}
 
 		debug {
-			writeln("\nSUCCESS:", res.statusCode.to!int, "(", res.statusCode, ")");
+			writeln("\nSENT:", res.statusCode.to!int, "(", res.statusCode, ")");
 		}
 	}
 

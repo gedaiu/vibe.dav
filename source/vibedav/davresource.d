@@ -229,7 +229,7 @@ DavProp propFrom(T, U)(string name, string ns, T value, U tagVal) {
 	return p;
 }
 
-DavProp getDavInterfaceProperty(I)(string key, DavResource resource) {
+DavProp getDavInterfaceProperty(I, T)(string key, T plugin, DavResource resource) {
 	DavProp result;
 
 	void getProp(T...)() {
@@ -238,8 +238,9 @@ DavProp getDavInterfaceProperty(I)(string key, DavResource resource) {
 			enum tagVal = getResourceTagProperty!(__traits(getAttributes, __traits(getMember, I, T[0])));
 			enum staticKey = val.name ~ ":" ~ val.ns;
 
+
 			if(staticKey == key) {
-				auto value = __traits(getMember, resource, T[0]);
+				auto value = __traits(getMember, plugin, T[0])(resource);
 				result = propFrom(val.name, val.ns, value, tagVal);
 			}
 
@@ -257,6 +258,16 @@ enum DavDepth : int {
 	one = 1,
 	infinity = 99
 };
+
+interface IDavReportSetProperties {
+
+	@property {
+
+		@ResourcePropertyLevelTagText("supported-report", "report", "DAV:")
+		@ResourceProperty("supported-report-set", "DAV:")
+		string[] supportedReportSet(DavResource resource);
+	}
+}
 
 interface IDavResourceProperties {
 	@ResourceProperty("creationdate", "DAV:")
@@ -292,21 +303,21 @@ interface IDavResourceExtendedProperties {
 
 interface IDavResourcePlugin {
 
-	bool canSetContent(URL url);
-	bool canGetStream(URL url);
-	bool canGetProperty(URL url, string name);
-	bool canSetProperty(URL url, string name);
-	bool canRemoveProperty(URL url, string name);
+	bool canSetContent(DavResource resource);
+	bool canGetStream(DavResource resource);
+	bool canGetProperty(DavResource resource, string name);
+	bool canSetProperty(DavResource resource, string name);
+	bool canRemoveProperty(DavResource resource, string name);
 
-	bool[string] getChildren(URL url);
-	void setContent(URL url, const ubyte[] content);
-	void setContent(URL url, InputStream content, ulong size);
-	InputStream stream(URL url);
+	bool[string] getChildren(DavResource resource);
+	void setContent(DavResource resource, const ubyte[] content);
+	void setContent(DavResource resource, InputStream content, ulong size);
+	InputStream stream(DavResource resource);
 
 	void copyPropertiesTo(URL source, URL destination);
 	DavProp property(DavResource resource, string name);
-	HTTPStatus setProperty(URL url, string name, DavProp prop);
-	HTTPStatus removeProperty(URL url, string name);
+	HTTPStatus setProperty(DavResource resource, string name, DavProp prop);
+	HTTPStatus removeProperty(DavResource resource, string name);
 
 	@property {
 		string name();
@@ -345,46 +356,43 @@ class ResourceBasicProperties : IDavResourcePlugin, IDavResourceProperties {
 		return resource.resourceType;
 	}
 
-	bool canSetContent(URL url) {
+	bool canSetContent(DavResource resource) {
 		return false;
 	}
 
-	bool canGetStream(URL url) {
+	bool canGetStream(DavResource resource) {
 		return false;
 	}
 
-	bool canSetProperty(URL url, string name) {
-		if(hasDavInterfaceProperty!IDavResourceProperties(name))
-			return false;
-
-		return true;
-	}
-
-	bool canRemoveProperty(URL url, string name) {
+	bool canSetProperty(DavResource resource, string name) {
 		return false;
 	}
 
-	bool canGetProperty(URL url, string name) {
+	bool canRemoveProperty(DavResource resource, string name) {
+		return false;
+	}
+
+	bool canGetProperty(DavResource resource, string name) {
 		if(hasDavInterfaceProperty!IDavResourceProperties(name))
 			return true;
 
 		return false;
 	}
 
-	bool[string] getChildren(URL url) {
+	bool[string] getChildren(DavResource resource) {
 		bool[string] list;
 		return list;
 	}
 
-	void setContent(URL url, const ubyte[] content) {
+	void setContent(DavResource resource, const ubyte[] content) {
 		throw new DavException(HTTPStatus.internalServerError, "Can't set content.");
 	}
 
-	void setContent(URL url, InputStream content, ulong size) {
+	void setContent(DavResource resource, InputStream content, ulong size) {
 		throw new DavException(HTTPStatus.internalServerError, "Can't set content.");
 	}
 
-	InputStream stream(URL url) {
+	InputStream stream(DavResource resource) {
 		throw new DavException(HTTPStatus.internalServerError, "Can't get stream.");
 	}
 
@@ -393,17 +401,17 @@ class ResourceBasicProperties : IDavResourcePlugin, IDavResourceProperties {
 	}
 
 	DavProp property(DavResource resource, string name) {
-		if(canGetProperty(resource.url, name))
-			return getDavInterfaceProperty!IDavResourceProperties(name, resource);
+		if(canGetProperty(resource, name))
+			return getDavInterfaceProperty!IDavResourceProperties(name, this, resource);
 
 		throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
 	}
 
-	HTTPStatus setProperty(URL url, string name, DavProp prop) {
+	HTTPStatus setProperty(DavResource resource, string name, DavProp prop) {
 		throw new DavException(HTTPStatus.internalServerError, "Can't set property.");
 	}
 
-	HTTPStatus removeProperty(URL url, string name) {
+	HTTPStatus removeProperty(DavResource resource, string name) {
 		throw new DavException(HTTPStatus.internalServerError, "Can't remove property.");
 	}
 
@@ -418,16 +426,16 @@ class ResourceCustomProperties : IDavResourcePlugin {
 
 	private static DavProp[string][string] properties;
 
-	bool canSetContent(URL url) {
+	bool canSetContent(DavResource resource) {
 		return false;
 	}
 
-	bool canGetStream(URL url) {
+	bool canGetStream(DavResource resource) {
 		return false;
 	}
 
-	bool canGetProperty(URL url, string name) {
-		string u = url.toString;
+	bool canGetProperty(DavResource resource, string name) {
+		string u = resource.url.toString;
 
 		if(u !in properties)
 			return false;
@@ -438,28 +446,28 @@ class ResourceCustomProperties : IDavResourcePlugin {
 		return true;
 	}
 
-	bool canSetProperty(URL url, string name) {
+	bool canSetProperty(DavResource resource, string name) {
 		return true;
 	}
 
-	bool canRemoveProperty(URL url, string name) {
-		return canGetProperty(url, name);
+	bool canRemoveProperty(DavResource resource, string name) {
+		return canGetProperty(resource, name);
 	}
 
-	bool[string] getChildren(URL url) {
+	bool[string] getChildren(DavResource resource) {
 		bool[string] list;
 		return list;
 	}
 
-	void setContent(URL url, const(ubyte[]) content) {
+	void setContent(DavResource resource, const(ubyte[]) content) {
 		throw new DavException(HTTPStatus.internalServerError, "Can't set content.");
 	}
 
-	void setContent(URL url, InputStream content, ulong size) {
+	void setContent(DavResource resource, InputStream content, ulong size) {
 		throw new DavException(HTTPStatus.internalServerError, "Can't set content.");
 	}
 
-	InputStream stream(URL url) {
+	InputStream stream(DavResource resource) {
 		throw new DavException(HTTPStatus.internalServerError, "Can't get stream.");
 	}
 
@@ -469,26 +477,26 @@ class ResourceCustomProperties : IDavResourcePlugin {
 	}
 
 	DavProp property(DavResource resource, string name) {
-		if(canGetProperty(resource.url, name))
+		if(canGetProperty(resource, name))
 			return properties[resource.url.toString][name];
 
 		throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
 	}
 
-	HTTPStatus setProperty(URL url, string name, DavProp prop) {
-		if(url.toString !in properties) {
+	HTTPStatus setProperty(DavResource resource, string name, DavProp prop) {
+		if(resource.url.toString !in properties) {
 			DavProp[string] list;
-			properties[url.toString] = list;
+			properties[resource.url.toString] = list;
 		}
 
-		properties[url.toString][name] = prop;
+		properties[resource.url.toString][name] = prop;
 
 		return HTTPStatus.ok;
 	}
 
-	HTTPStatus removeProperty(URL url, string name) {
-		if(canGetProperty(url, name))
-			properties[url.toString].remove(name);
+	HTTPStatus removeProperty(DavResource resource, string name) {
+		if(canGetProperty(resource, name))
+			properties[resource.url.toString].remove(name);
 
 		return HTTPStatus.notFound;
 	}
@@ -504,7 +512,7 @@ class ResourceCustomProperties : IDavResourcePlugin {
 class DavResource : IDavResourcePluginHub {
 	string href;
 	URL url;
-	IDavUser user;
+	string username;
 
 	SysTime creationDate;
 	SysTime lastModified;
@@ -530,13 +538,13 @@ class DavResource : IDavResourcePluginHub {
 			HTTPStatus result = HTTPStatus.notFound;
 
 			foreach_reverse(plugin; plugins)
-				if(plugin.canRemoveProperty(url, key))
-					try plugin.removeProperty(url, key);
+				if(plugin.canRemoveProperty(this, key))
+					try plugin.removeProperty(this, key);
 						catch (DavException e)
 							result = e.status;
 
 			foreach_reverse(plugin; plugins)
-				if(plugin.canGetProperty(url, key))
+				if(plugin.canGetProperty(this, key))
 					result = HTTPStatus.ok;
 
 			return result;
@@ -546,13 +554,13 @@ class DavResource : IDavResourcePluginHub {
 			HTTPStatus result = HTTPStatus.notFound;
 
 			foreach_reverse(plugin; plugins)
-				if(plugin.canSetProperty(url, key))
-					try plugin.setProperty(url, key, prop);
+				if(plugin.canSetProperty(this, key))
+					try plugin.setProperty(this, key, prop);
 						catch (DavException e)
 							result = e.status;
 
 			foreach_reverse(plugin; plugins)
-				if(plugin.canGetProperty(url, key))
+				if(plugin.canGetProperty(this, key))
 					result = HTTPStatus.ok;
 
 			return result;
@@ -588,7 +596,7 @@ class DavResource : IDavResourcePluginHub {
 
 	DavProp property(string key) {
 		foreach_reverse(plugin; plugins)
-			if(plugin.canGetProperty(url, key))
+			if(plugin.canGetProperty(this, key))
 				return plugin.property(this, key);
 
 		throw new DavException(HTTPStatus.notFound, "Not Found");
@@ -697,7 +705,7 @@ class DavResource : IDavResourcePluginHub {
 		bool[string] list;
 
 		foreach_reverse(plugin; plugins) {
-			auto tmpList = plugin.getChildren(url);
+			auto tmpList = plugin.getChildren(this);
 
 			foreach(string key, bool value; tmpList)
 				list[key] = value;
@@ -713,8 +721,8 @@ class DavResource : IDavResourcePluginHub {
 
 	void setContent(const ubyte[] content) {
 		foreach_reverse(plugin; plugins)
-			if(plugin.canSetContent(url)) {
-				plugin.setContent(url, content);
+			if(plugin.canSetContent(this)) {
+				plugin.setContent(this, content);
 
 				return;
 			}
@@ -725,8 +733,8 @@ class DavResource : IDavResourcePluginHub {
 	void setContent(InputStream content, ulong size) {
 
 		foreach_reverse(plugin; plugins)
-			if(plugin.canSetContent(url)) {
-				plugin.setContent(url, content, size);
+			if(plugin.canSetContent(this)) {
+				plugin.setContent(this, content, size);
 
 				return;
 			}
@@ -737,8 +745,8 @@ class DavResource : IDavResourcePluginHub {
 	@property {
 		InputStream stream() {
 			foreach_reverse(plugin; plugins)
-			if(plugin.canGetStream(url))
-				return plugin.stream(url);
+			if(plugin.canGetStream(this))
+				return plugin.stream(this);
 
 			throw new DavException(HTTPStatus.methodNotAllowed, "No plugin support.");
 		}

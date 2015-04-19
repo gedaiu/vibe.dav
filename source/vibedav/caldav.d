@@ -28,41 +28,67 @@ import std.uuid;
 
 import tested;
 
-/*
-interface ICalendarCollectionProperties {
-
+interface ICalDavProperties {
 	@property {
-		@ResourceProperty("calendar-description", "urn:ietf:params:xml:ns:caldav")
-		string calendarDescription();
 
-		@ResourceProperty("calendar-timezone", "urn:ietf:params:xml:ns:caldav")
-		TimeZone calendarTimezone();
+		/// rfc4791 - 6.2.1
+		@ResourceProperty("calendar-home-set", "urn:ietf:params:xml:ns:caldav")
+		@ResourcePropertyTagText("href", "DAV:")
+		string[] calendarHomeSet(DavResource resource);
 
-		@ResourceProperty("supported-calendar-component-set", "urn:ietf:params:xml:ns:caldav")
-		@ResourcePropertyValueAttr("comp", "urn:ietf:params:xml:ns:caldav", "name")
-		string[] supportedCalendarComponentSet();
+		///rfc6638 - 2.1.1
+		@ResourceProperty("schedule-outbox-URL", "urn:ietf:params:xml:ns:caldav")
+		@ResourcePropertyTagText("href", "DAV:")
+		string scheduleOutboxURL(DavResource resource);
 
-		@ResourceProperty("supported-calendar-data", "urn:ietf:params:xml:ns:caldav")
-		@ResourcePropertyTagAttributes("calendar-data", "urn:ietf:params:xml:ns:caldav")
-		string[string][] supportedCalendarData();
+		/// rfc6638 - 2.2.1
+		@ResourceProperty("schedule-inbox-URL", "urn:ietf:params:xml:ns:caldav")
+		@ResourcePropertyTagText("href", "DAV:")
+		string scheduleInboxURL(DavResource resource);
 
-		@ResourceProperty("max-resource-size", "urn:ietf:params:xml:ns:caldav")
-		ulong maxResourceSize();
-
-		@ResourceProperty("min-date-time", "urn:ietf:params:xml:ns:caldav")
-		SysTime minDateTime();
-
-		@ResourceProperty("max-date-time", "urn:ietf:params:xml:ns:caldav")
-		SysTime maxDateTime();
-
-		@ResourceProperty("max-instances", "urn:ietf:params:xml:ns:caldav")
-		ulong maxInstances();
-
-		@ResourceProperty("max-attendees-per-instance", "urn:ietf:params:xml:ns:caldav")
-		ulong maxAttendeesPerInstance();
+		/// rfc6638 - 2.4.1
+		@ResourceProperty("calendar-user-address-set", "urn:ietf:params:xml:ns:caldav")
+		@ResourcePropertyTagText("href", "DAV:")
+		string[] calendarUserAddressSet(DavResource resource);
 	}
 }
 
+
+interface ICalDavCollectionProperties {
+
+	@property {
+		@ResourceProperty("calendar-description", "urn:ietf:params:xml:ns:caldav")
+		string calendarDescription(DavResource resource);
+
+		@ResourceProperty("calendar-timezone", "urn:ietf:params:xml:ns:caldav")
+		TimeZone calendarTimezone(DavResource resource);
+
+		@ResourceProperty("supported-calendar-component-set", "urn:ietf:params:xml:ns:caldav")
+		@ResourcePropertyValueAttr("comp", "urn:ietf:params:xml:ns:caldav", "name")
+		string[] supportedCalendarComponentSet(DavResource resource);
+
+		@ResourceProperty("supported-calendar-data", "urn:ietf:params:xml:ns:caldav")
+		@ResourcePropertyTagAttributes("calendar-data", "urn:ietf:params:xml:ns:caldav")
+		string[string][] supportedCalendarData(DavResource resource);
+
+		@ResourceProperty("max-resource-size", "urn:ietf:params:xml:ns:caldav")
+		ulong maxResourceSize(DavResource resource);
+
+		@ResourceProperty("min-date-time", "urn:ietf:params:xml:ns:caldav")
+		SysTime minDateTime(DavResource resource);
+
+		@ResourceProperty("max-date-time", "urn:ietf:params:xml:ns:caldav")
+		SysTime maxDateTime(DavResource resource);
+
+		@ResourceProperty("max-instances", "urn:ietf:params:xml:ns:caldav")
+		ulong maxInstances(DavResource resource);
+
+		@ResourceProperty("max-attendees-per-instance", "urn:ietf:params:xml:ns:caldav")
+		ulong maxAttendeesPerInstance(DavResource resource);
+	}
+}
+
+/*
 class DavCalendarBaseResource : DavResource, ICalendarCollectionProperties, IDavResourceExtendedProperties {
 	protected IDav dav;
 
@@ -372,34 +398,188 @@ class BaseCalDavUserCollection : IDavUserCollection {
 		return new BaseCalDavUser(name);
 	}
 }
+*/
 
-class CalDavHome : IDavPlugin {
-	bool exists(URL url) {
+private bool matchPluginUrl(URL url, string username) {
+	if(username == "")
+		return false;
+
+	string path = url.path.toString;
+
+	string calendarsPath = "/principals/" ~ username ~ "/";
+	auto len = calendarsPath.length;
+
+	if(path.length >= len && path[0..len] == calendarsPath)
+		return true;
+
+	return false;
+}
+
+class CalDavResourcePlugin : IDavResourcePlugin, ICalDavProperties, IDavReportSetProperties {
+
+	string[] calendarHomeSet(DavResource resource) {
+		if(matchPluginUrl(resource.url, resource.username))
+			return ["/principals/" ~ resource.username ~ "/calendars"];
+
+		throw new DavException(HTTPStatus.notFound, "not found");
+	}
+
+	string scheduleOutboxURL(DavResource resource) {
+		if(matchPluginUrl(resource.url, resource.username))
+			return "/principals/" ~ resource.username ~ "/outbox";
+
+		throw new DavException(HTTPStatus.notFound, "not found");
+	}
+
+	string scheduleInboxURL(DavResource resource) {
+		if(matchPluginUrl(resource.url, resource.username))
+			return "/principals/" ~ resource.username ~ "/inbox";
+
+		throw new DavException(HTTPStatus.notFound, "not found");
+	}
+
+	string[] calendarUserAddressSet(DavResource resource) {
+		if(matchPluginUrl(resource.url, resource.username))
+			return [ "mailto:" ~ resource.username ~ "@local.com" ];
+
+		throw new DavException(HTTPStatus.notFound, "not found");
+	}
+
+	string[] supportedReportSet(DavResource resource) {
+		if(matchPluginUrl(resource.url, resource.username))
+			return ["free-busy-query:DAV:", "calendar-query:DAV:", "calendar-multiget:DAV:"];
+
+		return [];
+	}
+
+	bool canSetContent(DavResource resource) {
 		return false;
 	}
 
-	bool canCreateCollection(URL url) {
+	bool canGetStream(DavResource resource) {
 		return false;
 	}
 
-	bool canCreateResource(URL url) {
+	bool canSetProperty(DavResource resource, string name) {
 		return false;
 	}
 
-	DavResource getResource(URL url, IDavUser user = null) {
-		return null;
+	bool canRemoveProperty(DavResource resource, string name) {
+		return false;
 	}
 
-	DavResource[] getResources(URL url, ulong depth, IDavUser user = null) {
-		return null;
+	bool canGetProperty(DavResource resource, string name) {
+		if(matchPluginUrl(resource.url, resource.username) && hasDavInterfaceProperty!ICalDavProperties(name))
+			return true;
+
+		if(matchPluginUrl(resource.url, resource.username) && hasDavInterfaceProperty!IDavReportSetProperties(name))
+			return true;
+
+		return false;
 	}
 
-	DavResource createCollection(URL url) {
-		return null;
+	bool[string] getChildren(DavResource resource) {
+		bool[string] list;
+		return list;
 	}
 
-	DavResource createResource(URL url) {
-		return null;
+	void setContent(DavResource resource, const ubyte[] content) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't set content.");
+	}
+
+	void setContent(DavResource resource, InputStream content, ulong size) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't set content.");
+	}
+
+	InputStream stream(DavResource resource) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't get stream.");
+	}
+
+	void copyPropertiesTo(URL source, URL destination) { }
+
+	DavProp property(DavResource resource, string name) {
+		if(!matchPluginUrl(resource.url, resource.username))
+			throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
+
+		if(hasDavInterfaceProperty!ICalDavProperties(name))
+			return getDavInterfaceProperty!ICalDavProperties(name, this, resource);
+
+		if(hasDavInterfaceProperty!IDavReportSetProperties(name))
+			return getDavInterfaceProperty!IDavReportSetProperties(name, this, resource);
+
+		throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
+	}
+
+	HTTPStatus setProperty(DavResource resource, string name, DavProp prop) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't set property.");
+	}
+
+	HTTPStatus removeProperty(DavResource resource, string name) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't remove property.");
+	}
+
+	@property {
+		string name() {
+			return "ResourceBasicProperties";
+		}
 	}
 }
-*/
+
+class CalDavPlugin : IDavPlugin {
+
+	private IDav _dav;
+
+	this(IDav dav) {
+		_dav = dav;
+	}
+
+	bool exists(URL url, string username) {
+		return false;
+	}
+
+	bool canCreateCollection(URL url, string username) {
+		return false;
+	}
+
+	bool canCreateResource(URL url, string username) {
+		return false;
+	}
+
+	void removeResource(URL url, string username) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't remove resource.");
+	}
+
+	DavResource getResource(URL url, string username) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't get resource.");
+	}
+
+	DavResource createCollection(URL url, string username) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't create collection.");
+	}
+
+	DavResource createResource(URL url, string username) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't create resource.");
+	}
+
+	void bindResourcePlugins(ref DavResource resource) {
+		resource.registerPlugin(new CalDavResourcePlugin);
+	}
+
+	@property {
+		IDav dav() {
+			return _dav;
+		}
+
+		string name() {
+			return "CalDavPlugin";
+		}
+
+		string[] support(URL url, string username) {
+			if(matchPluginUrl(url, username))
+				return [ "calendar-access" ];
+
+			return [];
+		}
+	}
+}
+

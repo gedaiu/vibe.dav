@@ -144,7 +144,7 @@ interface IDav : IDavResourceAccess, IDavPluginHub {
 	void remove(DavRequest request, DavResponse response);
 	void move(DavRequest request, DavResponse response);
 	void copy(DavRequest request, DavResponse response);
-
+	void report(DavRequest request, DavResponse response);
 
 	@property
 	Path rootUrl();
@@ -264,9 +264,6 @@ class Dav : IDav {
 		DavResource[] tmpList;
 
 		tmpList ~= getResource(url, username);
-
-		if(depth == 0)
-			list ~= tmpList;
 
 		while(tmpList.length > 0 && depth > 0) {
 			auto oldLen = tmpList.length;
@@ -536,6 +533,10 @@ class Dav : IDav {
 		response.flush;
 	}
 
+	void report(DavRequest request, DavResponse response) {
+
+	}
+
 	void copy(DavRequest request, DavResponse response) {
 		string username = request.username;
 
@@ -655,6 +656,8 @@ HTTPServerRequestDelegate serveDav(T : IDav)(T dav) {
 				dav.copy(request, response);
 			} else if(req.method == HTTPMethod.MOVE) {
 				dav.move(request, response);
+			} else if(req.method == HTTPMethod.REPORT) {
+				dav.report(request, response);
 			} else {
 				res.statusCode = HTTPStatus.notImplemented;
 				res.writeBody("", "text/plain");

@@ -259,6 +259,15 @@ enum DavDepth : int {
 	infinity = 99
 };
 
+interface IDavBindingProperties {
+
+	@property {
+
+		@ResourceProperty("resource-id", "DAV:")
+		string resourceId(DavResource resource);
+	}
+}
+
 interface IDavReportSetProperties {
 
 	@property {
@@ -590,9 +599,21 @@ class DavResource : IDavResourcePluginHub {
 	}
 
 	DavProp property(string key) {
+		DavProp p;
+
 		foreach_reverse(plugin; plugins)
-			if(plugin.canGetProperty(this, key))
-				return plugin.property(this, key);
+			if(plugin.canGetProperty(this, key)) {
+				auto t = plugin.property(this, key);
+
+				if(p is null)
+					p = t;
+				else if(p.isGroup && t.isGroup)
+					foreach(string k, DavProp child; t)
+						p.addChild(child);
+			}
+
+		if(p !is null)
+			return p;
 
 		throw new DavException(HTTPStatus.notFound, "Not Found");
 	}

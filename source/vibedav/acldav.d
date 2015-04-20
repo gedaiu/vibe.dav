@@ -28,6 +28,10 @@ interface ACLDavProperties {
 		@ResourceProperty("principal-collection-set", "DAV:")
 		@ResourcePropertyTagText("href", "DAV:")
 		string[] principalCollectionSet(DavResource resource);
+
+		@ResourceProperty("owner", "DAV:")
+		@ResourcePropertyTagText("href", "DAV:")
+		string owner(DavResource resource);
 	}
 }
 
@@ -42,20 +46,24 @@ private bool matchPluginUrl(URL url) {
 	return false;
 }
 
-class ACLDavResourcePlugin : ACLDavProperties, IDavResourcePlugin {
+class ACLDavResourcePlugin : ACLDavProperties, IDavResourcePlugin, IDavReportSetProperties {
 
 	string currentUserPrincipal(DavResource resource) {
 		if(matchPluginUrl(resource.url))
-			return "/principals/" ~ resource.username;
+			return "/principals/" ~ resource.username ~ "/";
 
 		throw new DavException(HTTPStatus.notFound, "not found");
 	}
 
 	string principalURL(DavResource resource) {
 		if(matchPluginUrl(resource.url))
-			return "/principals/" ~ resource.username;
+			return "/principals/" ~ resource.username ~ "/";
 
 		throw new DavException(HTTPStatus.notFound, "not found");
+	}
+
+	string owner(DavResource resource) {
+		return principalURL(resource);
 	}
 
 	string[] principalCollectionSet(DavResource resource) {
@@ -63,6 +71,13 @@ class ACLDavResourcePlugin : ACLDavProperties, IDavResourcePlugin {
 			return [ "/principals/" ];
 
 		throw new DavException(HTTPStatus.notFound, "not found");
+	}
+
+	string[] supportedReportSet(DavResource resource) {
+		if(matchPluginUrl(resource.url))
+			return ["expand-property:DAV:", "principal-property-search:DAV:", "principal-search-property-set:DAV:"];
+
+		return [];
 	}
 
 
@@ -83,7 +98,13 @@ class ACLDavResourcePlugin : ACLDavProperties, IDavResourcePlugin {
 	}
 
 	bool canGetProperty(DavResource resource, string name) {
-		if(matchPluginUrl(resource.url) && hasDavInterfaceProperty!ACLDavProperties(name))
+		if(!matchPluginUrl(resource.url))
+			return false;
+
+		if(hasDavInterfaceProperty!ACLDavProperties(name))
+			return true;
+
+		if(hasDavInterfaceProperty!IDavReportSetProperties(name))
 			return true;
 
 		return false;
@@ -109,8 +130,14 @@ class ACLDavResourcePlugin : ACLDavProperties, IDavResourcePlugin {
 	void copyPropertiesTo(URL source, URL destination) { }
 
 	DavProp property(DavResource resource, string name) {
-		if(canGetProperty(resource, name))
+		if(!matchPluginUrl(resource.url))
+			throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
+
+		if(hasDavInterfaceProperty!ACLDavProperties(name))
 			return getDavInterfaceProperty!ACLDavProperties(name, this, resource);
+
+		if(hasDavInterfaceProperty!IDavReportSetProperties(name))
+			return getDavInterfaceProperty!IDavReportSetProperties(name, this, resource);
 
 		throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
 	}

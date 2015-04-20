@@ -280,8 +280,6 @@ class FileResourcePlugin : IDavResourcePlugin {
 
 		tmpFile.flush;
 
-		writeln("setContent: ", tmpPath, " ", nativePath);
-
 		std.file.copy(tmpPath, nativePath);
 		std.file.remove(tmpPath);
 	}

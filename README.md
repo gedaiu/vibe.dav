@@ -83,3 +83,4 @@ auto router = new URLRouter;
 * Improve XML support (eg: change xml node format from "name:DAV:" to "{DAV:}name")
 * Add DB support
 * Add migration tools from https://github.com/Kozea/Radicale
+* Maybe update the @ResourceProperty... Structs to something more general like @ResourceProperty!"<tag>%value</tag>"()

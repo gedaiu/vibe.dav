@@ -313,16 +313,15 @@ class FileResourcePlugin : IDavResourcePlugin {
 }
 
 /// File Dav impplementation
-class FileDav : IDavPlugin {
+class FileDav : BaseDavPlugin {
 
 	private {
-		IDav _dav;
 		Path baseUrlPath;
 		Path basePath;
 	}
 
 	this(IDav dav, Path baseUrlPath, Path basePath) {
-		_dav = dav;
+		super(dav);
 		this.baseUrlPath = baseUrlPath;
 		this.basePath = basePath;
 	}
@@ -347,86 +346,90 @@ class FileDav : IDavPlugin {
 		return getFilePath(baseUrlPath, basePath, url);
 	}
 
-	bool exists(URL url, string username) {
-		auto filePath = filePath(url);
+	override {
+		bool exists(URL url, string username) {
+			auto filePath = filePath(url);
 
-		return filePath.toString.exists;
-	}
+			return filePath.toString.exists;
+		}
 
-	bool canCreateResource(URL url, string username) {
-		return !exists(url, username);
-	}
+		bool canCreateResource(URL url, string username) {
+			return !exists(url, username);
+		}
 
-	bool canCreateCollection(URL url, string username) {
-		return !exists(url, username);
-	}
+		bool canCreateCollection(URL url, string username) {
+			return !exists(url, username);
+		}
 
-	void removeResource(URL url, string username) {
-		if(!exists(url, username))
-			throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
+		void removeResource(URL url, string username) {
+			if(!exists(url, username))
+				throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
 
-		auto filePath = filePath(url).toString;
+			auto filePath = filePath(url).toString;
 
-		if(filePath.isDir)
-			filePath.rmdirRecurse;
-		else
-			filePath.remove;
+			if(filePath.isDir)
+				filePath.rmdirRecurse;
+			else
+				filePath.remove;
+		}
 
-	}
+		DavResource getResource(URL url, string username) {
+			if(!exists(url, username))
+				throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
 
-	DavResource getResource(URL url, string username) {
-		if(!exists(url, username))
-			throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
+			auto filePath = filePath(url);
 
-		auto filePath = filePath(url);
+			DavResource resource = new DavResource(_dav, url);
+			resource.username = username;
+			setResourceProperties(resource);
 
-		DavResource resource = new DavResource(_dav, url);
-		resource.username = username;
-		setResourceProperties(resource);
+			return resource;
+		}
 
-		return resource;
-	}
+		DavResource createResource(URL url, string username) {
+			auto filePath = filePath(url).toString;
 
-	DavResource createResource(URL url, string username) {
-		auto filePath = filePath(url).toString;
+			File(filePath, "w");
 
-		File(filePath, "w");
+			return getResource(url, username);
+		}
 
-		return getResource(url, username);
-	}
+		DavResource createCollection(URL url, string username) {
+			auto filePath = filePath(url);
 
-	DavResource createCollection(URL url, string username) {
-		auto filePath = filePath(url);
+			if(filePath.toString.exists)
+				throw new DavException(HTTPStatus.methodNotAllowed, "Resource already exists.");
 
-		if(filePath.toString.exists)
-			throw new DavException(HTTPStatus.methodNotAllowed, "Resource already exists.");
+			filePath.toString.mkdirRecurse;
 
-		filePath.toString.mkdirRecurse;
+			return getResource(url, username);
+		}
 
-		return getResource(url, username);
-	}
+		void bindResourcePlugins(DavResource resource) {
+			if(resource.isCollection)
+				resource.registerPlugin(new DirectoryResourcePlugin(baseUrlPath, basePath));
+			else
+				resource.registerPlugin(new FileResourcePlugin(baseUrlPath, basePath));
 
-	void bindResourcePlugins(DavResource resource) {
-		if(resource.isCollection)
-			resource.registerPlugin(new DirectoryResourcePlugin(baseUrlPath, basePath));
-		else
-			resource.registerPlugin(new FileResourcePlugin(baseUrlPath, basePath));
+			resource.registerPlugin(new ResourceCustomProperties);
+			resource.registerPlugin(new ResourceBasicProperties);
+		}
 
-		resource.registerPlugin(new ResourceCustomProperties);
-		resource.registerPlugin(new ResourceBasicProperties);
+
+		@property {
+			IDav dav() {
+				return _dav;
+			}
+
+			string[] support(URL url, string username) {
+				return ["1", "2", "3"];
+			}
+		}
 	}
 
 	@property {
 		string name() {
 			return "FileDav";
-		}
-
-		IDav dav() {
-			return _dav;
-		}
-
-		string[] support(URL url, string username) {
-			return ["1", "2", "3"];
 		}
 	}
 }

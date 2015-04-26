@@ -109,6 +109,10 @@ struct DavResponse {
 			_content = value;
 		}
 
+		void content(DavProp value) {
+			content(value.toString);
+		}
+
 		void mimeType(string value) {
 			response.headers["Content-Type"] = value;
 		}
@@ -162,23 +166,40 @@ struct DavResponse {
 		response.writeRawBody(resource.stream);
 	}
 
-	void setPropContent (DavResource[] list, bool[string] props) {
+	void setPropContent (DavResource[] list, bool[string] props, HTTPStatus[string] responseCodes = null) {
 		statusCode = HTTPStatus.multiStatus;
 		mimeType = "application/xml";
 
 		string str = `<?xml version="1.0" encoding="UTF-8"?>`;
-		auto response = parseXMLProp(`<d:multistatus xmlns:d="DAV:"></d:multistatus>`);
+		auto multistatus = new DavProp;
+		multistatus.addNamespace("d", "DAV:");
+		multistatus.name = "d:multistatus";
 
 		foreach(item; list)
-			item.filterProps(response["d:multistatus"], props);
+			item.filterProps(multistatus, props);
 
-		_content =  str ~ response.toString;
+		if(responseCodes !is null) {
+			foreach(string path, HTTPStatus status; responseCodes) {
+				DavProp element = new DavProp;
+				multistatus.addChild(element);
+
+				element.name = "response";
+				element.namespaceAttr = "DAV:";
+				element[`d:href`] = path;
+				element[`d:status`] = "HTTP/1.1 " ~ status.to!int.to!string ~ " " ~ status.to!string;
+			}
+		}
+
+		_content =  str ~ multistatus.toString;
 	}
 }
 
 /// The HTTP request wrapper
 struct DavRequest {
-	private HTTPServerRequest request;
+	private {
+		HTTPServerRequest request;
+		DavProp document;
+	}
 
 	this(HTTPServerRequest req) {
 		request = req;
@@ -220,14 +241,14 @@ struct DavRequest {
 		}
 
 		DavProp content() {
-			DavProp document;
+
+			if(document !is null)
+				return document;
 
 			if(request.bodyReader is null)
 				return document;
 
 			string requestXml = cast(string)request.bodyReader.readAllUTF8;
-
-			debug writeln("requestXml:", requestXml);
 
 			if(requestXml.length > 0) {
 				try document = requestXml.parseXMLProp;

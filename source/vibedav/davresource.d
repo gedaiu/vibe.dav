@@ -688,7 +688,6 @@ class DavResource : IDavResourcePluginHub {
 				foreach(prop; removeList)
 					foreach(string key, p; prop) {
 						auto status = removeProperty(key);
-
 						result ~= `<d:propstat><d:prop>` ~ p.toString ~ `</d:prop>`;
 						result ~= `<d:status>HTTP/1.1 ` ~ status.to!int.to!string ~ ` ` ~ status.to!string ~ `</d:status></d:propstat>`;
 					}
@@ -743,7 +742,7 @@ class DavResource : IDavResourcePluginHub {
 				return;
 			}
 
-		throw new DavException(HTTPStatus.methodNotAllowed, "No plugin support.");
+		throw new DavException(HTTPStatus.methodNotAllowed, "setContent No plugin support.");
 	}
 
 	void setContent(InputStream content, ulong size) {
@@ -755,7 +754,7 @@ class DavResource : IDavResourcePluginHub {
 				return;
 			}
 
-		throw new DavException(HTTPStatus.methodNotAllowed, "No plugin support.");
+		throw new DavException(HTTPStatus.methodNotAllowed, "setContent No plugin support.");
 	}
 
 	@property {
@@ -764,7 +763,7 @@ class DavResource : IDavResourcePluginHub {
 			if(plugin.canGetStream(this))
 				return plugin.stream(this);
 
-			throw new DavException(HTTPStatus.methodNotAllowed, "No plugin support.");
+			throw new DavException(HTTPStatus.methodNotAllowed, "stream No plugin support.");
 		}
 
 		pure nothrow bool isCollection() {

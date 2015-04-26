@@ -57,6 +57,67 @@ class DavException : Exception {
 	}
 }
 
+struct DavReport {
+	string name;
+	string ns;
+}
+
+string reportName(DavProp reportBody) {
+	if(reportBody[0].name == "?xml")
+		return reportBody[1].tagName ~ ":" ~ reportBody[1].namespace;
+
+	return reportBody[0].tagName ~ ":" ~ reportBody[0].namespace;
+}
+
+DavReport getReportProperty(T...)() {
+	static if(T.length == 0)
+		static assert(false, "There is no `@DavReport` attribute.");
+	else static if( is(typeof(T[0]) == DavReport) )
+		return T[0];
+	else
+		return getResourceProperty!(T[1..$]);
+}
+
+bool hasDavReport(I)(string key) {
+	bool result = false;
+
+	void keyExist(T...)() {
+		static if(T.length > 0) {
+			enum val = getReportProperty!(__traits(getAttributes, __traits(getMember, I, T[0])));
+			enum staticKey = val.name ~ ":" ~ val.ns;
+
+			if(staticKey == key)
+				result = true;
+
+			keyExist!(T[1..$])();
+		}
+	}
+
+	keyExist!(__traits(allMembers, I))();
+
+	return result;
+}
+
+void getDavReport(I)(I plugin, DavRequest request, DavResponse response) {
+	string key = request.content.reportName;
+
+	void getProp(T...)() {
+		static if(T.length > 0) {
+			enum val = getReportProperty!(__traits(getAttributes, __traits(getMember, I, T[0])));
+			enum staticKey = val.name ~ ":" ~ val.ns;
+
+
+			if(staticKey == key) {
+				__traits(getMember, plugin, T[0])(request, response);
+			}
+
+			getProp!(T[1..$])();
+		}
+	}
+
+	getProp!(__traits(allMembers, I))();
+}
+
 interface IDavResourceAccess {
 	bool exists(URL url, string username);
 	bool canCreateCollection(URL url, string username);
@@ -71,6 +132,12 @@ interface IDavResourceAccess {
 }
 
 interface IDavPlugin : IDavResourceAccess {
+
+	bool hasReport(URL url, string username, string name);
+	void report(DavRequest request, DavResponse response);
+
+	void notice(string action, DavResource resource);
+
 	@property {
 		IDav dav();
 		string name();
@@ -86,9 +153,10 @@ interface IDavPluginHub {
 
 
 abstract class BaseDavPlugin : IDavPlugin {
-	private IDav _dav;
+	protected IDav _dav;
 
 	this(IDav dav) {
+		dav.registerPlugin(this);
 		_dav = dav;
 	}
 
@@ -122,6 +190,18 @@ abstract class BaseDavPlugin : IDavPlugin {
 
 	void bindResourcePlugins(DavResource resource) { }
 
+	bool hasReport(URL url, string username, string name) {
+		return false;
+	}
+
+	void report(DavRequest request, DavResponse response) {
+		throw new DavException(HTTPStatus.internalServerError, "Can't get report.");
+	}
+
+	void notice(string action, DavResource resource) {
+
+	}
+
 	@property {
 		IDav dav() {
 			return _dav;
@@ -145,6 +225,10 @@ interface IDav : IDavResourceAccess, IDavPluginHub {
 	void move(DavRequest request, DavResponse response);
 	void copy(DavRequest request, DavResponse response);
 	void report(DavRequest request, DavResponse response);
+
+	void notice(string action, DavResource resource);
+
+	DavResource[] getResources(URL url, ulong depth, string username);
 
 	@property
 	Path rootUrl();
@@ -241,20 +325,23 @@ class Dav : IDav {
 
 	void removeResource(URL url, string username) {
 		foreach_reverse(plugin; plugins)
-			if(plugin.exists(url, username))
+			if(plugin.exists(url, username)) {
+				notice("deleted", getResource(url, username));
 				return plugin.removeResource(url, username);
+			}
 
 		throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
 	}
 
 	DavResource getResource(URL url, string username) {
-		foreach_reverse(plugin; plugins)
+		foreach_reverse(plugin; plugins) {
 			if(plugin.exists(url, username)) {
 				auto res = plugin.getResource(url, username);
 				bindResourcePlugins(res);
 
 				return res;
 			}
+		}
 
 		throw new DavException(HTTPStatus.notFound, "`" ~ url.toString ~ "` not found.");
 	}
@@ -292,6 +379,8 @@ class Dav : IDav {
 				auto res = plugin.createCollection(url, username);
 				bindResourcePlugins(res);
 
+				notice("created", res);
+
 				return res;
 			}
 
@@ -304,12 +393,13 @@ class Dav : IDav {
 				auto res = plugin.createResource(url, username);
 				bindResourcePlugins(res);
 
+				notice("created", res);
+
 				return res;
 			}
 
 		throw new DavException(HTTPStatus.methodNotAllowed, "No plugin available.");
 	}
-
 
 	void bindResourcePlugins(DavResource resource) {
 		foreach(plugin; plugins)
@@ -372,6 +462,36 @@ class Dav : IDav {
 		response.setPropContent(list, requestedProperties);
 
 		response.flush;
+	}
+
+	void proppatch(DavRequest request, DavResponse response) {
+		auto ifHeader = request.ifCondition;
+		response.statusCode = HTTPStatus.ok;
+
+		DavStorage.locks.check(request.url, ifHeader);
+		DavResource resource = getResource(request.url, request.username);
+
+		notice("changed", resource);
+
+		auto xmlString = resource.propPatch(request.content);
+
+		response.content = xmlString;
+		response.flush;
+	}
+
+	void report(DavRequest request, DavResponse response) {
+		auto ifHeader = request.ifCondition;
+
+		string report = "";
+
+		foreach_reverse(plugin; plugins) {
+			if(plugin.hasReport(request.url, request.username, request.content.reportName)) {
+				plugin.report(request, response);
+				return;
+			}
+		}
+
+		throw new DavException(HTTPStatus.notFound, "There is no report.");
 	}
 
 	void lock(DavRequest request, DavResponse response) {
@@ -464,24 +584,12 @@ class Dav : IDav {
 		DavStorage.locks.check(request.url, request.ifCondition);
 
 		resource.setContent(request.stream, request.contentLength);
+		notice("changed", resource);
 
 		DavStorage.locks.setETag(resource.url, resource.eTag);
 
 		response.statusCode = HTTPStatus.created;
 
-		response.flush;
-	}
-
-	void proppatch(DavRequest request, DavResponse response) {
-		auto ifHeader = request.ifCondition;
-		response.statusCode = HTTPStatus.ok;
-
-		DavStorage.locks.check(request.url, ifHeader);
-		DavResource resource = getResource(request.url, request.username);
-
-		auto xmlString = resource.propPatch(request.content);
-
-		response.content = xmlString;
 		response.flush;
 	}
 
@@ -498,6 +606,7 @@ class Dav : IDav {
 
 		response.statusCode = HTTPStatus.created;
 		createCollection(request.url, request.username);
+		notice("created", getResource(request.url, request.username));
 		response.flush;
 	}
 
@@ -531,10 +640,6 @@ class Dav : IDav {
 		remove(request, response);
 
 		response.flush;
-	}
-
-	void report(DavRequest request, DavResponse response) {
-
 	}
 
 	void copy(DavRequest request, DavResponse response) {
@@ -608,8 +713,14 @@ class Dav : IDav {
 		}
 
 		localCopy(source, destination);
+		notice("changed", destination);
 
 		response.flush;
+	}
+
+	void notice(string action, DavResource resource) {
+		foreach_reverse(plugin; plugins)
+			plugin.notice(action, resource);
 	}
 }
 

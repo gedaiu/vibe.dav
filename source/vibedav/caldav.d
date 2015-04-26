@@ -8,6 +8,7 @@ module vibedav.caldav;
 
 public import vibedav.base;
 import vibedav.filedav;
+import vibedav.syncdav;
 
 import vibe.core.file;
 import vibe.http.server;
@@ -53,7 +54,6 @@ interface ICalDavProperties {
 	}
 }
 
-
 interface ICalDavCollectionProperties {
 
 	@property {
@@ -85,14 +85,26 @@ interface ICalDavCollectionProperties {
 
 		@ResourceProperty("max-attendees-per-instance", "urn:ietf:params:xml:ns:caldav")
 		ulong maxAttendeesPerInstance(DavResource resource);
-
-		/*
-        <default-alarm-vevent-date xmlns="urn:ietf:params:xml:ns:caldav" />
-        <default-alarm-vevent-datetime xmlns="urn:ietf:params:xml:ns:caldav" />
-        <supported-calendar-component-sets xmlns="urn:ietf:params:xml:ns:caldav" />
-        <schedule-calendar-transp xmlns="urn:ietf:params:xml:ns:caldav" />
-        <calendar-free-busy-set xmlns="urn:ietf:params:xml:ns:caldav" />*/
 	}
+}
+
+interface ICalDavResourceProperties {
+
+	@property {
+		@ResourceProperty("calendar-data", "urn:ietf:params:xml:ns:caldav")
+		string calendarData(DavResource resource);
+	}
+}
+
+interface ICalDavReports {
+	@DavReport("free-busy-query", "urn:ietf:params:xml:ns:caldav")
+	void freeBusyQuery(DavRequest request, DavResponse response);
+
+	@DavReport("calendar-query", "urn:ietf:params:xml:ns:caldav")
+	void calendarQuery(DavRequest request, DavResponse response);
+
+	@DavReport("calendar-multiget", "urn:ietf:params:xml:ns:caldav")
+	void calendarMultiget(DavRequest request, DavResponse response);
 }
 
 
@@ -100,6 +112,13 @@ interface ICalDavSchedulingProperties {
 
 	// for Inbox
 	//<schedule-default-calendar-URL xmlns="urn:ietf:params:xml:ns:caldav" />
+
+	/*
+    <default-alarm-vevent-date xmlns="urn:ietf:params:xml:ns:caldav" />
+    <default-alarm-vevent-datetime xmlns="urn:ietf:params:xml:ns:caldav" />
+    <supported-calendar-component-sets xmlns="urn:ietf:params:xml:ns:caldav" />
+    <schedule-calendar-transp xmlns="urn:ietf:params:xml:ns:caldav" />
+    <calendar-free-busy-set xmlns="urn:ietf:params:xml:ns:caldav" />*/
 }
 
 private bool matchPluginUrl(URL url, string username) {
@@ -117,7 +136,7 @@ private bool matchPluginUrl(URL url, string username) {
 	return false;
 }
 
-class CalDavResourcePlugin : BaseDavResourcePlugin, ICalDavProperties, IDavReportSetProperties, IDavBindingProperties {
+class CalDavDataPlugin : BaseDavResourcePlugin, ICalDavProperties, IDavReportSetProperties, IDavBindingProperties {
 
 	string[] calendarHomeSet(DavResource resource) {
 
@@ -201,6 +220,53 @@ class CalDavResourcePlugin : BaseDavResourcePlugin, ICalDavProperties, IDavRepor
 }
 
 
+class CalDavResourcePlugin : BaseDavResourcePlugin, ICalDavResourceProperties {
+	string calendarData(DavResource resource) {
+
+		auto content = resource.stream;
+		string data;
+
+		while(!content.empty) {
+			auto leastSize = content.leastSize;
+			ubyte[] buf;
+
+			buf.length = leastSize;
+			content.read(buf);
+
+			data ~= buf;
+		}
+
+		return data;
+	}
+
+	override {
+
+		bool canGetProperty(DavResource resource, string name) {
+			if(matchPluginUrl(resource.url, resource.username) && hasDavInterfaceProperty!ICalDavResourceProperties(name))
+				return true;
+
+			return false;
+		}
+
+		DavProp property(DavResource resource, string name) {
+			if(!matchPluginUrl(resource.url, resource.username))
+				throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
+
+			if(hasDavInterfaceProperty!ICalDavResourceProperties(name))
+				return getDavInterfaceProperty!ICalDavResourceProperties(name, this, resource);
+
+			throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
+		}
+	}
+
+
+	@property {
+		string name() {
+			return "CalDavResourcePlugin";
+		}
+	}
+}
+
 class CalDavCollectionPlugin : BaseDavResourcePlugin, ICalDavCollectionProperties {
 
 	string calendarDescription(DavResource resource) {
@@ -271,24 +337,86 @@ class CalDavCollectionPlugin : BaseDavResourcePlugin, ICalDavCollectionPropertie
 	}
 }
 
-class CalDavPlugin : BaseDavPlugin {
+class CalDavPlugin : BaseDavPlugin, ICalDavReports {
 
 	this(IDav dav) {
 		super(dav);
 	}
 
+	override {
 
-	override void bindResourcePlugins(DavResource resource) {
+		void bindResourcePlugins(DavResource resource) {
 
-		if(!matchPluginUrl(resource.url, resource.username))
-			return;
+			if(!matchPluginUrl(resource.url, resource.username))
+				return;
 
-		resource.registerPlugin(new CalDavResourcePlugin);
+			resource.registerPlugin(new CalDavDataPlugin);
+			auto path = resource.url.path.toString.stripSlashes;
 
-		if(resource.isCollection && resource.url.path.toString.stripSlashes != "principals/" ~ resource.username ~ "/calendars") {
-			resource.resourceType ~= "calendar:urn:ietf:params:xml:ns:caldav";
-			resource.registerPlugin(new CalDavCollectionPlugin);
+			if(resource.isCollection && path != "principals/" ~ resource.username ~ "/calendars") {
+				resource.resourceType ~= "calendar:urn:ietf:params:xml:ns:caldav";
+				resource.registerPlugin(new CalDavCollectionPlugin);
+			} else if(!resource.isCollection && path.length > 4 && path[$-4..$].toLower == ".ics") {
+				resource.registerPlugin(new CalDavResourcePlugin);
+			}
 		}
+
+		bool hasReport(URL url, string username, string name) {
+
+			if(!matchPluginUrl(url, username))
+				return false;
+
+			if(hasDavReport!ICalDavReports(name))
+				return true;
+
+			return false;
+		}
+
+		void report(DavRequest request, DavResponse response) {
+			if(!matchPluginUrl(request.url, request.username) || !hasDavReport!ICalDavReports(request.content.reportName))
+				throw new DavException(HTTPStatus.internalServerError, "Can't get report.");
+
+			getDavReport!ICalDavReports(this, request, response);
+		}
+	}
+
+	void freeBusyQuery(DavRequest request, DavResponse response) {
+		throw new DavException(HTTPStatus.internalServerError, "Not Implemented");
+	}
+
+	void calendarQuery(DavRequest request, DavResponse response) {
+		throw new DavException(HTTPStatus.internalServerError, "Not Implemented");
+	}
+
+	void calendarMultiget(DavRequest request, DavResponse response) {
+		response.mimeType = "application/xml";
+		response.statusCode = HTTPStatus.multiStatus;
+		auto reportData = request.content;
+
+		bool[string] requestedProperties;
+
+		foreach(name, p; reportData["calendar-multiget"]["prop"])
+			requestedProperties[name] = true;
+
+		DavResource[] list;
+
+		auto hrefList = [ reportData["calendar-multiget"] ].getTagChilds("href");
+
+		HTTPStatus[string] resourceStatus;
+
+		foreach(p; hrefList) {
+			string path = p.value;
+
+			try {
+				list ~= dav.getResource(URL(path), request.username);
+				resourceStatus[path] = HTTPStatus.ok;
+			} catch(DavException e) {
+				resourceStatus[path] = e.status;
+			}
+		}
+
+		response.setPropContent(list, requestedProperties, resourceStatus);
+		response.flush;
 	}
 
 	@property {

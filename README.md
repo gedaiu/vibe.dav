@@ -14,7 +14,7 @@ CardDav no support
 
 Use
 
-	void serveFileDav(string rootUrl, string rootPath)(URLRouter router, IDavUserCollection userCollection)
+	IDav serveFileDav(URLRouter router, string rootUrl, string rootPath);
 
 to bind the fileDav handlers to a vibe router.
 
@@ -25,7 +25,7 @@ The next exemple will map every resource from `http://localhost/files` to `publi
 	...
 
 	auto router = new URLRouter;
-	router.serveFileDav!("/files/", "public/files/")(userConnection);
+	router.serveFileDav("", "public");
 
 	...
 
@@ -33,42 +33,20 @@ The next exemple will map every resource from `http://localhost/files` to `publi
 
 ### CalDav
 
-Use the factory class that maps resource types to url nodes:
 
-	alias T = FileDavResourceFactory!(
-		[rootUrl], [rootPath],
+Example of maping a simple cal dav folder structure:
 
-		[nodeUrl], [collection type], [resource type]
-		...
-	);
-
-
-Example of maping a simple cal dav folder structure (more work will be done here):
-
-auto router = new URLRouter;
+	auto router = new URLRouter;
 
 	// Do some basic auth
 	router.any("/calendar/*", performBasicAuth("Site Realm", toDelegate(&checkPassword)));
 
-	// Create a basic user collection, used to manage CalDav users
-	auto userConnection = new BaseCalDavUserCollection;
+	// Bind the public folder to a vibe router.
+	auto dav = router.serveFileDav("", "public");
 
-	// Create a custom file maping
-	alias factory = FileDavResourceFactory!(
-
-		// map "http://127.0.0.1/calendar" to "public/calendar"
-		"calendar", "public/calendar",
-
-		// map any folder to `FileDavCollection` and file to `FileDavResource`
-		"",               FileDavCollection,         FileDavResource,
-
-		// map the `personal` folder from users home
-		// to `FileDavCalendarCollection` and files to `FileDavCalendarResource`
-		":user/personal", FileDavCalendarCollection, FileDavCalendarResource
-	);
-
-	// Bind the custom FileDav maping to a vibe router.
-	router.serveFileDav!factory(userConnection);
+	new ACLDavPlugin(dav); // add ACL support to the DAV instance
+	new CalDavPlugin(dav); // create and bind the CalDav plugin to the DAV instance
+	new SyncDavPlugin(dav); // create and bind the sync plugin to the DAV instance
 
 	...
 

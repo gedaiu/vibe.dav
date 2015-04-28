@@ -214,7 +214,7 @@ class CalDavDataPlugin : BaseDavResourcePlugin, ICalDavProperties, IDavReportSet
 
 	@property {
 		string name() {
-			return "ResourceBasicProperties";
+			return "CalDavDataPlugin";
 		}
 	}
 }
@@ -332,7 +332,7 @@ class CalDavCollectionPlugin : BaseDavResourcePlugin, ICalDavCollectionPropertie
 
 	@property {
 		string name() {
-			return "ResourceBasicProperties";
+			return "CalDavCollectionPlugin";
 		}
 	}
 }

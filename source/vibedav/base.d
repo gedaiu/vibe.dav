@@ -311,6 +311,7 @@ class Dav : IDav {
 	}
 
 	void registerPlugin(IDavPlugin plugin) {
+		assert(!hasPlugin(plugin.name), plugin.name ~ " already added.");
 		plugins ~= plugin;
 	}
 
@@ -338,7 +339,6 @@ class Dav : IDav {
 			if(plugin.exists(url, username)) {
 				auto res = plugin.getResource(url, username);
 				bindResourcePlugins(res);
-
 				return res;
 			}
 		}

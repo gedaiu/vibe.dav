@@ -152,7 +152,7 @@ class ACLDavResourcePlugin : ACLDavProperties, IDavResourcePlugin, IDavReportSet
 
 	@property {
 		string name() {
-			return "ResourceBasicProperties";
+			return "ACLDavResourcePlugin";
 		}
 	}
 }

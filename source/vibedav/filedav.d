@@ -315,7 +315,7 @@ class FileResourcePlugin : IDavResourcePlugin {
 /// File Dav impplementation
 class FileDav : BaseDavPlugin {
 
-	private {
+	protected {
 		Path baseUrlPath;
 		Path basePath;
 	}
@@ -326,9 +326,26 @@ class FileDav : BaseDavPlugin {
 		this.basePath = basePath;
 	}
 
-	private {
+	protected {
 		void setResourceProperties(DavResource resource) {
 			string path = filePath(resource.url).toString;
+			assert(path.exists);
+
+			setResourceInfoProperties(resource);
+
+			if(path.isDir)
+				setCollection(resource);
+		}
+
+		void setCollection(DavResource resource) {
+			resource.resourceType ~= "collection:DAV:";
+		}
+
+		void setResourceInfoProperties(DavResource resource) {
+
+			string path = filePath(resource.url).toString;
+
+			assert(path.exists);
 
 			resource.creationDate = creationDate(path);
 			resource.lastModified = lastModified(path);
@@ -336,9 +353,6 @@ class FileDav : BaseDavPlugin {
 			resource.contentType = getMimeTypeForFile(path);
 			resource.contentLength = contentLength(path);
 			resource.name = baseName(path);
-
-			if(path.isDir)
-				resource.resourceType ~= "collection:DAV:";
 		}
 	}
 

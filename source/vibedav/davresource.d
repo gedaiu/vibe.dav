@@ -427,7 +427,6 @@ class ResourceBasicProperties : BaseDavResourcePlugin, IDavResourceProperties {
 		return resource.name;
 	}
 
-
 	override {
 		bool canGetProperty(DavResource resource, string name) {
 			if(hasDavInterfaceProperty!IDavResourceProperties(name))
@@ -575,6 +574,7 @@ class DavResource : IDavResourcePluginHub {
 	}
 
 	void registerPlugin(IDavResourcePlugin plugin) {
+		assert(!hasPlugin(plugin.name), plugin.name ~ " already added.");
 		plugins ~= plugin;
 	}
 
@@ -601,8 +601,9 @@ class DavResource : IDavResourcePluginHub {
 	DavProp property(string key) {
 		DavProp p;
 
-		foreach_reverse(plugin; plugins)
+		foreach_reverse(plugin; plugins) {
 			if(plugin.canGetProperty(this, key)) {
+
 				auto t = plugin.property(this, key);
 
 				if(p is null)
@@ -611,6 +612,7 @@ class DavResource : IDavResourcePluginHub {
 					foreach(string k, DavProp child; t)
 						p.addChild(child);
 			}
+		}
 
 		if(p !is null)
 			return p;

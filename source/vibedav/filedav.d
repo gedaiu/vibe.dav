@@ -236,7 +236,6 @@ class FileResourcePlugin : IDavResourcePlugin {
 		return filePath.exists;
 	}
 
-
 	bool canGetStream(DavResource resource) {
 		return canSetContent(resource);
 	}
@@ -329,7 +328,7 @@ class FileDav : BaseDavPlugin {
 	protected {
 		void setResourceProperties(DavResource resource) {
 			string path = filePath(resource.url).toString;
-			assert(path.exists);
+			assert(path.exists, "Can't set basic properties. The path does not exist.");
 
 			setResourceInfoProperties(resource);
 
@@ -429,7 +428,6 @@ class FileDav : BaseDavPlugin {
 			resource.registerPlugin(new ResourceBasicProperties);
 		}
 
-
 		@property {
 			IDav dav() {
 				return _dav;
@@ -454,7 +452,6 @@ IDav serveFileDav(URLRouter router, string rootUrl, string rootPath) {
 
 	auto dav = new Dav(rootUrl);
 	auto fileDav = new FileDav(dav, Path(rootUrl), Path(rootPath));
-	dav.registerPlugin(fileDav);
 
 	if(rootUrl != "") rootUrl = "/"~rootUrl~"/";
 

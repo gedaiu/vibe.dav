@@ -18,6 +18,7 @@ import vibe.http.router : URLRouter;
 import vibe.stream.operations;
 import vibe.internal.meta.uda;
 
+import std.stdio;
 import std.datetime;
 import std.string;
 import std.file;
@@ -436,6 +437,7 @@ class ResourceBasicProperties : BaseDavResourcePlugin, IDavResourceProperties {
 		}
 
 		DavProp property(DavResource resource, string name) {
+
 			if(canGetProperty(resource, name))
 				return getDavInterfaceProperty!IDavResourceProperties(name, this, resource);
 
@@ -535,6 +537,8 @@ class DavResource : IDavResourcePluginHub {
 	this(IDav dav, URL url) {
 		this.dav = dav;
 		this.url = url;
+
+		resourceType = [];
 
 		string strUrl = url.toString;
 	}

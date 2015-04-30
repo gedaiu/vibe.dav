@@ -371,10 +371,24 @@ vEvent parseVEvent(string[] data) {
 	vEvent ev;
 
 	foreach(item; data) {
-		auto row = item.split(":");
+		auto valueSep = item.indexOf(":");
+		auto metaSep = item.indexOf(";");
+		string key;
+		string val;
 
-		if(row.length > 1)
-			ev[row[0]] = row[1];
+		if(metaSep != -1 && metaSep < valueSep) {
+			key = item[0..metaSep];
+			val = item[metaSep+1..$];
+		} else {
+			auto row = item.split(":");
+
+			assert(row.length == 2);
+
+			key = row[0];
+			val = row[1];
+		}
+
+		ev[key] = val;
 	}
 
 	return ev;
@@ -429,4 +443,22 @@ END:VCALENDAR";
 
 	assert(parsed.vEvents.length == 1);
 	assert(parsed.vEvents[0]["DTSTART"] == "20150401T000000Z");
+}
+
+@name("Parse VEVENT with timezone")
+unittest {
+
+	string data = "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Apple Inc.//Mac OS X 10.10.3//EN
+CALSCALE:GREGORIAN
+BEGIN:VEVENT
+DTEND;TZID=Europe/Bucharest:20150401T010000Z
+END:VEVENT
+END:VCALENDAR";
+
+	auto parsed = data.parseICalendar;
+
+	assert(parsed.vEvents.length == 1);
+	assert(parsed.vEvents[0]["DTEND"] == "TZID=Europe/Bucharest:20150401T010000Z");
 }

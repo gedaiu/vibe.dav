@@ -35,27 +35,6 @@ import std.algorithm.comparison : max;
 
 import tested: testName = name;
 
-string stripSlashes(string path) {
-	return path.stripBeginSlashes.stripEndSlasshes;
-}
-
-string stripBeginSlashes(string path) {
-	if(path.length > 0 && path[0] == '/')
-		path = path[1..$];
-
-	if(path.length > 1 && path[0..2] == "./")
-		path = path[2..$];
-
-	return path;
-}
-
-string stripEndSlasshes(string path) {
-	if(path.length > 0 && path[path.length-1] == '/')
-		path = path[0..$-1];
-
-	return path;
-}
-
 /// Compute a file etag
 string eTag(string path) {
 	import std.digest.crc;
@@ -124,21 +103,6 @@ bool[string] getFolderContent(string format = "*")(string path, Path rootPath, P
 	return list;
 }
 
-Path getFilePath(Path baseUrlPath, Path basePath, URL url) {
-	string path = url.path.toString.stripSlashes;
-	string filePath;
-
-	filePath = path[baseUrlPath.toString.length..$];
-
-	return basePath ~ filePath;
-}
-
-@testName("Basic getFilePath")
-unittest {
-	auto path = getFilePath(Path("test/"), Path("/base/"), URL("http://127.0.0.1/test/file.txt"));
-	assert(path.toString == "/base/file.txt");
-}
-
 class DirectoryResourcePlugin : IDavResourcePlugin {
 	private {
 		Path baseUrlPath;
@@ -177,8 +141,14 @@ class DirectoryResourcePlugin : IDavResourcePlugin {
 	}
 
 	bool[string] getChildren(DavResource resource) {
+		bool[string] list;
+
 		auto nativePath = filePath(resource.url).toString;
-		return getFolderContent!"*"(nativePath, basePath, baseUrlPath);
+
+		if(nativePath.exists)
+			list = getFolderContent!"*"(nativePath, basePath, baseUrlPath);
+
+		return list;
 	}
 
 	void setContent(DavResource resource, const ubyte[] content) {

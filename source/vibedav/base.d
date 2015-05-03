@@ -93,7 +93,10 @@ unittest {
 	assert(path.toString == "/base/file.txt");
 }
 
-
+string urlToString(URL url) {
+	string name = url.path.toNativeString;
+	return name.replace(" ", "%20");
+}
 
 struct DavReport {
 	string name;
@@ -326,7 +329,7 @@ class Dav : IDav {
 			list["getcontentlength:DAV:"] = true;
 			list["getcontenttype:DAV:"] = true;
 			list["getetag:DAV:"] = true;
-			list["lastmodified:DAV:"] = true;
+			list["getlastmodified:DAV:"] = true;
 			list["resourcetype:DAV:"] = true;
 
 			return list;

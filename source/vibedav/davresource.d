@@ -631,7 +631,7 @@ class DavResource : IDavResourcePluginHub {
 
 		DavProp[][int] result;
 
-		item[`d:href`] = url.path.toNativeString;
+		item[`d:href`] = urlToString(url);
 
 		foreach_reverse(key; props.keys) {
 			DavProp p;
@@ -682,7 +682,7 @@ class DavResource : IDavResourcePluginHub {
 	string propPatch(DavProp document) {
 		string description;
 		string result = `<?xml version="1.0" encoding="utf-8" ?><d:multistatus xmlns:d="DAV:"><d:response>`;
-		result ~= `<d:href>` ~ url.toString ~ `</d:href>`;
+		result ~= `<d:href>` ~ urlToString(url) ~ `</d:href>`;
 
 		auto updateList = [document].getTagChilds("propertyupdate");
 
@@ -716,8 +716,6 @@ class DavResource : IDavResourcePluginHub {
 			result ~= `<d:responsedescription>` ~ description ~ `</d:responsedescription>`;
 
 		result ~= `</d:response></d:multistatus>`;
-
-		string strUrl = url.toString;
 
 		return result;
 	}

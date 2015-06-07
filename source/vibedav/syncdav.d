@@ -84,7 +84,7 @@ class SyncDavPlugin : BaseDavPlugin, ISyncDavReports {
 		super(dav);
 	}
 
-	private {
+	protected {
 
 		ulong getToken(DavProp[] syncTokenList) {
 			if(syncTokenList.length == 0)

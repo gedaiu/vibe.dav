@@ -352,6 +352,7 @@ class Dav : IDav {
 	}
 
 	void registerPlugin(IDavPlugin plugin) {
+		assert(plugin !is null, "can't set null plugin");
 		assert(!hasPlugin(plugin.name), plugin.name ~ " already added.");
 		plugins ~= plugin;
 	}
@@ -380,6 +381,7 @@ class Dav : IDav {
 			if(plugin.exists(url, username)) {
 				auto res = plugin.getResource(url, username);
 				bindResourcePlugins(res);
+
 				return res;
 			}
 		}
@@ -400,7 +402,16 @@ class Dav : IDav {
 				bool[string] childList = resource.getChildren();
 
 				foreach(string key, bool val; childList) {
-					tmpList ~= getResource(URL("http://a/" ~ key), username);
+					try {
+						tmpList ~= getResource(URL("http://a/" ~ key), username);
+					} catch(DavException e) {
+						if(e.status == HTTPStatus.notFound) {
+							throw new DavException(HTTPStatus.internalServerError,
+								"Resource `" ~ url.to!string ~ "` said that it has `" ~ key ~ "` child but it can not be found.");
+						} else {
+							throw e;
+						}
+					}
 				}
 			}
 

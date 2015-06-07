@@ -250,6 +250,10 @@ struct DavRequest {
 
 			string requestXml = cast(string)request.bodyReader.readAllUTF8;
 
+			debug {
+				writeln("\n", requestXml, "\n");
+			}
+
 			if(requestXml.length > 0) {
 				try document = requestXml.parseXMLProp;
 				catch (DavPropException e)

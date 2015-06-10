@@ -826,10 +826,14 @@ HTTPServerRequestDelegate serveDav(T : IDav)(T dav) {
 				res.writeBody("", "text/plain");
 			}
 		} catch(DavException e) {
-			writeln("ERROR:",e.status.to!int, "(", e.status, ") - ", e.msg); stdout.flush;
+			writeln("ERROR:",e.status.to!int, "(", e.status, ") - ", e.msg);
 
 			res.statusCode = e.status;
 			res.writeBody(e.msg, e.mime);
+		} catch(Throwable t) {
+			writeln("ERROR:",t);
+			res.statusCode = 500;
+			res.writeBody(t.to!string);
 		}
 
 		debug {

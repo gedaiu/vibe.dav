@@ -37,6 +37,9 @@ private mixin template vAccessTpl() {
 				}
 			}
 
+			if(key.length > 2 && key[0..2] == "X-")
+				return true;
+
 			return false;
 		}
 

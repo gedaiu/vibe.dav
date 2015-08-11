@@ -309,7 +309,12 @@ struct DavRequest {
 			return getHeader!"Overwrite"(request.headers) == "T";
 		}
 
-		static DavRequest Create(string requestUrl="", string[string] headers = cast(string[string])[]) {
+		static DavRequest Create(string requestUrl="") {
+			string[string] headers;
+			return DavRequest.Create(requestUrl, headers);
+		}
+
+		static DavRequest Create(string requestUrl, string[string] headers) {
 			InetHeaderMap inetHeaders;
 
 			//set the headers

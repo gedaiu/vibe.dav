@@ -5,11 +5,7 @@
 	"authors": ["Szabo Bogdan"],
 	"license": "MIT",
 	"dependencies": {
-		"vibe-d": ">=0.7.24",
-		"tested-atom": {
-			"version": ">=0.0.1",
-			"path": "../tested-atom"
-		},
+		"vibe-d": ">=0.7.24"
 	},
 
 	"targetType": "library"

@@ -31,7 +31,10 @@ import std.stdio;
 import std.typecons;
 import std.uri;
 import std.uuid;
-import std.algorithm.comparison : max;
+static if (__traits(compiles, { import std.algorithm.comparison : max; }))
+    import std.algorithm.comparison : max;
+else
+    import std.algorithm;
 
 import tested: testName = name;
 

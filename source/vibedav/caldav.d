@@ -141,21 +141,21 @@ class CalDavDataPlugin : BaseDavResourcePlugin, ICalDavProperties, IDavReportSet
 	string[] calendarHomeSet(DavResource resource) {
 
 		if(matchPluginUrl(resource.path, resource.username))
-			return [ "/principals/" ~ resource.username ~ "/calendars/" ];
+			return [ "/" ~ resource.rootURL ~"principals/" ~ resource.username ~ "/calendars/" ];
 
 		throw new DavException(HTTPStatus.notFound, "not found");
 	}
 
 	string scheduleOutboxURL(DavResource resource) {
 		if(matchPluginUrl(resource.path, resource.username))
-			return "/principals/" ~ resource.username ~ "/outbox/";
+			return "/" ~ resource.rootURL ~"principals/" ~ resource.username ~ "/outbox/";
 
 		throw new DavException(HTTPStatus.notFound, "not found");
 	}
 
 	string scheduleInboxURL(DavResource resource) {
 		if(matchPluginUrl(resource.path, resource.username))
-			return "/principals/" ~ resource.username ~ "/inbox/";
+			return "/" ~ resource.rootURL ~"principals/" ~ resource.username ~ "/inbox/";
 
 		throw new DavException(HTTPStatus.notFound, "not found");
 	}
@@ -267,6 +267,22 @@ class CalDavResourcePlugin : BaseDavResourcePlugin, ICalDavResourceProperties {
 	}
 }
 
+class CalDavPrincipalCollectionPlugin : BaseDavResourcePlugin {
+	override {
+		bool[string] getChildren(DavResource resource) {
+			bool[string] list;
+			string path = resource.rootURL ~ "principals/" ~ resource.username ~ "/calendars/";
+			list[path] = true;
+			return list;
+		}
+	}
+	@property {
+		string name() {
+			return "CalDavPrincipalCollectionPlugin";
+		}
+	}
+}
+
 class CalDavCollectionPlugin : BaseDavResourcePlugin, ICalDavCollectionProperties {
 
 	string calendarDescription(DavResource resource) {
@@ -343,12 +359,28 @@ class CalDavPlugin : BaseDavPlugin, ICalDavReports {
 		super(dav);
 	}
 
+	bool isCalendarsCollection(Path path, string username) {
+		if(!matchPluginUrl(path, username))
+			return false;
+
+		return path.length == 3 && path[2] == "calendars";
+	}
+
 	override {
+		bool exists(URL url, string username) {
+			return isCalendarsCollection(dav.path(url), username);
+		}
 
 		void bindResourcePlugins(DavResource resource) {
 
 			if(!matchPluginUrl(resource.path, resource.username))
 				return;
+
+
+			if(isCalendarsCollection(resource.path, resource.username)) {
+				writeln("isCalendarsCollection(resource.path, resource.username) ===>", isCalendarsCollection(resource.path, resource.username));
+				resource.registerPlugin(new CalDavPrincipalCollectionPlugin);
+			}
 
 			resource.registerPlugin(new CalDavDataPlugin);
 			auto path = resource.url.path.toString.stripSlashes;

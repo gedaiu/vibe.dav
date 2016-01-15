@@ -20,7 +20,7 @@ import vibe.utils.dictionarylist;
 import tested;
 
 
-alias HeaderList = DictionaryList!(string, false, 32L);
+alias HeaderList = DictionaryList!(string, false, 12L, false);
 
 string getHeaderValue(HeaderList headers, string name, string defaultValue = "") {
 
@@ -135,17 +135,19 @@ struct DavResponse {
 		return response.headers[key];
 	}
 
-	static DavResponse Create() {
-		import vibe.stream.stdio;
-		import vibe.utils.memory;
+	version(unittest) {
+		static DavResponse Create() {
+			import vibe.stream.stdio;
+			import vibe.utils.memory;
 
-		StdFileStream conn = new StdFileStream(false, true);
-		ConnectionStream raw_connection = new StdFileStream(false, true);
-		HTTPServerSettings settings = new HTTPServerSettings;
-		Allocator req_alloc = defaultAllocator();
+			StdFileStream conn = new StdFileStream(false, true);
+			ConnectionStream raw_connection = new StdFileStream(false, true);
+			HTTPServerSettings settings = new HTTPServerSettings;
+			Allocator req_alloc = defaultAllocator();
 
-		HTTPServerResponse response = new HTTPServerResponse(conn, raw_connection, settings, req_alloc);
-		return DavResponse(response);
+			HTTPServerResponse response = new HTTPServerResponse(conn, raw_connection, settings, req_alloc);
+			return DavResponse(response);
+		}
 	}
 
 	@name("Test opIndex")
@@ -156,14 +158,16 @@ struct DavResponse {
 	}
 
 	void flush() {
+		writeln("1.FLUSH!!!!");
 		response.statusCode = statusCode;
 		debug writeln("\n", _content);
 		response.writeBody(_content, response.headers["Content-Type"]);
 	}
 
 	void flush(DavResource resource) {
+		writeln("2.FLUSH!!!!", resource.contentLength);
 		response.statusCode = statusCode;
-		response.writeRawBody(resource.stream);
+		response.writeRawBody(resource.stream, resource.contentLength);
 	}
 
 	void setPropContent (DavResource[] list, bool[string] props, HTTPStatus[string] responseCodes = null) {

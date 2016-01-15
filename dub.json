@@ -5,7 +5,10 @@
 	"authors": ["Szabo Bogdan"],
 	"license": "MIT",
 	"dependencies": {
-		"vibe-d": ">=0.7.24",
+		"vibe-d": {
+      "version": ">=0.7.26",
+      "path": "../vibe.d"
+    },
 		"tested": "~master"
 	},
 

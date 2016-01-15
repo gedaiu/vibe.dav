@@ -83,7 +83,7 @@ Path getFilePath(Path baseUrlPath, Path basePath, URL url) {
 	string path = url.path.toString.stripSlashes;
 	string filePath;
 
-	filePath = path[baseUrlPath.toString.length..$];
+	filePath = path[baseUrlPath.toString.length..$].stripSlashes;
 
 	return basePath ~ filePath;
 }
@@ -274,6 +274,7 @@ interface IDav : IDavResourceAccess, IDavPluginHub {
 
 	@property
 	Path rootUrl();
+	Path path(Url);
 }
 
 /// The main DAV protocol implementation
@@ -287,6 +288,16 @@ class Dav : IDav {
 	@property
 	Path rootUrl() {
 		return _rootUrl;
+	}
+
+	Path path(URL url) {
+		auto root = Path("/") ~ rootUrl;
+
+		if(url.path.startsWith(root)) {
+			return url.path.relativeTo(root);
+		}
+
+		throw new DavException(HTTPStatus.internalServerError, "`" ~ url.path.toString ~ "` is not a valid DAV path.");
 	}
 
 	this(string rootUrl) {
@@ -455,14 +466,18 @@ class Dav : IDav {
 	}
 
 	void bindResourcePlugins(DavResource resource) {
-		foreach(plugin; plugins)
+		foreach(plugin; plugins) {
+			writeln("plugin-->", plugin.name);
+
 			plugin.bindResourcePlugins(resource);
+		}
 	}
 
 	bool exists(URL url, string username) {
-		foreach_reverse(plugin; plugins)
+		foreach_reverse(plugin; plugins) {
 			if(plugin.exists(url, username))
 				return true;
+		}
 
 		return false;
 	}
@@ -599,19 +614,31 @@ class Dav : IDav {
 	void get(DavRequest request, DavResponse response) {
 		DavResource resource = getResource(request.url, request.username);
 
+		writeln("a1");
+
 		response["Etag"] = "\"" ~ resource.eTag ~ "\"";
+				writeln("a2");
 		response["Last-Modified"] = toRFC822DateTimeString(resource.lastModified);
+				writeln("a3");
 		response["Content-Type"] = resource.contentType;
+				writeln("a4");
 		response["Content-Length"] = resource.contentLength.to!string;
 
+		writeln("a5");
 		if(!request.ifModifiedSince(resource) || !request.ifNoneMatch(resource)) {
+				writeln("a6");
 			response.statusCode = HTTPStatus.NotModified;
+				writeln("a7");
 			response.flush;
+				writeln("a8");
 			return;
 		}
 
+		writeln("a9");
 		response.flush(resource);
+		writeln("a10");
 		DavStorage.locks.setETag(resource.url, resource.eTag);
+		writeln("a11");
 	}
 
 	void head(DavRequest request, DavResponse response) {
@@ -793,9 +820,11 @@ HTTPServerRequestDelegate serveDav(T : IDav)(T dav) {
 					writeln(key, ": ", val);
 			}
 
+			writeln(1);
 			DavRequest request = DavRequest(req);
 			DavResponse response = DavResponse(res);
 
+			writeln(2);
 			if(req.method == HTTPMethod.OPTIONS) {
 				dav.options(request, response);
 			} else if(req.method == HTTPMethod.PROPFIND) {
@@ -826,20 +855,29 @@ HTTPServerRequestDelegate serveDav(T : IDav)(T dav) {
 				res.statusCode = HTTPStatus.notImplemented;
 				res.writeBody("", "text/plain");
 			}
+
+
+			writeln(3);
 		} catch(DavException e) {
+			writeln(4);
 			writeln("ERROR:",e.status.to!int, "(", e.status, ") - ", e.msg);
 
 			res.statusCode = e.status;
 			res.writeBody(e.msg, e.mime);
 		} catch(Throwable t) {
+
+			writeln(5);
 			writeln("ERROR:",t);
 			res.statusCode = 500;
 			res.writeBody(t.to!string);
 		}
 
+		writeln(6);
 		debug {
 			writeln("\nSENT:", res.statusCode.to!int, "(", res.statusCode, ")");
 		}
+
+		writeln(7);
 	}
 
 	return &callback;

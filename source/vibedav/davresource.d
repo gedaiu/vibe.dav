@@ -337,7 +337,6 @@ interface IDavResourcePlugin {
 	}
 }
 
-
 abstract class BaseDavResourcePlugin : IDavResourcePlugin {
 
 	bool canSetContent(DavResource resource) {

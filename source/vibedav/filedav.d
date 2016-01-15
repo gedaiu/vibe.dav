@@ -236,7 +236,6 @@ class FileResourcePlugin : IDavResourcePlugin {
 	}
 
 	void setContent(DavResource resource, InputStream content, ulong size) {
-
 		auto nativePath = filePath(resource.url).toString;
 
 		auto tmpPath = nativePath ~ ".tmp";

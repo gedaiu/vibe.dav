@@ -396,7 +396,6 @@ interface IDavResourcePluginHub {
 	bool hasPlugin(string name);
 }
 
-
 class ResourceBasicProperties : BaseDavResourcePlugin, IDavResourceProperties {
 
 	SysTime creationDate(DavResource resource) {
@@ -591,7 +590,6 @@ class DavResource : IDavResourcePluginHub {
 	}
 
 	@property {
-
 		string fullURL() {
 			return url.toString;
 		}

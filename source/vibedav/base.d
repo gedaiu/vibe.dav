@@ -274,7 +274,7 @@ interface IDav : IDavResourceAccess, IDavPluginHub {
 
 	@property
 	Path rootUrl();
-	Path path(Url);
+	Path path(URL);
 }
 
 /// The main DAV protocol implementation

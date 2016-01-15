@@ -594,6 +594,14 @@ class DavResource : IDavResourcePluginHub {
 			return url.toString;
 		}
 
+		string rootURL() {
+			return dav.rootUrl.toString;
+		}
+
+		Path path() {
+			return dav.path(url);
+		}
+
 		nothrow pure string type() {
 			return "DavResource";
 		}

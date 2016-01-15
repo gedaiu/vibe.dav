@@ -35,29 +35,25 @@ interface ACLDavProperties {
 	}
 }
 
-private bool matchPluginUrl(URL url) {
-	string path = url.path.toString;
+private bool matchPluginUrl(Path path) {
+	string strPath = path.toString;
+	enum len = "principals/".length;
 
-	enum len = "/principals/".length;
-
-	if(path.length >= len && path[0..len] == "/principals/")
-		return true;
-
-	return false;
+	return strPath.length >= len && strPath[0..len] == "principals/";
 }
 
 class ACLDavResourcePlugin : ACLDavProperties, IDavResourcePlugin, IDavReportSetProperties {
 
 	string currentUserPrincipal(DavResource resource) {
-		if(matchPluginUrl(resource.url))
-			return "/principals/" ~ resource.username ~ "/";
+		if(matchPluginUrl(resource.path))
+			return "/" ~ resource.rootURL ~ "principals/" ~ resource.username ~ "/";
 
 		throw new DavException(HTTPStatus.notFound, "not found");
 	}
 
 	string principalURL(DavResource resource) {
-		if(matchPluginUrl(resource.url))
-			return "/principals/" ~ resource.username ~ "/";
+		if(matchPluginUrl(resource.path))
+			return  "/" ~ resource.rootURL ~ "principals/" ~ resource.username ~ "/";
 
 		throw new DavException(HTTPStatus.notFound, "not found");
 	}
@@ -67,19 +63,18 @@ class ACLDavResourcePlugin : ACLDavProperties, IDavResourcePlugin, IDavReportSet
 	}
 
 	string[] principalCollectionSet(DavResource resource) {
-		if(matchPluginUrl(resource.url))
-			return [ "/principals/" ];
+		if(matchPluginUrl(resource.path))
+			return [  "/" ~ resource.rootURL ~ "principals/" ];
 
 		throw new DavException(HTTPStatus.notFound, "not found");
 	}
 
 	string[] supportedReportSet(DavResource resource) {
-		if(matchPluginUrl(resource.url))
+		if(matchPluginUrl(resource.path))
 			return ["expand-property:DAV:", "principal-property-search:DAV:", "principal-search-property-set:DAV:"];
 
 		return [];
 	}
-
 
 	bool canSetContent(DavResource resource) {
 		return false;
@@ -98,7 +93,7 @@ class ACLDavResourcePlugin : ACLDavProperties, IDavResourcePlugin, IDavReportSet
 	}
 
 	bool canGetProperty(DavResource resource, string name) {
-		if(!matchPluginUrl(resource.url))
+		if(!matchPluginUrl(resource.path))
 			return false;
 
 		if(hasDavInterfaceProperty!ACLDavProperties(name))
@@ -130,7 +125,7 @@ class ACLDavResourcePlugin : ACLDavProperties, IDavResourcePlugin, IDavReportSet
 	void copyPropertiesTo(URL source, URL destination) { }
 
 	DavProp property(DavResource resource, string name) {
-		if(!matchPluginUrl(resource.url))
+		if(!matchPluginUrl(resource.path))
 			throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
 
 		if(hasDavInterfaceProperty!ACLDavProperties(name))
@@ -175,11 +170,7 @@ class ACLDavPlugin : BaseDavPlugin {
 		}
 
 		override string[] support(URL url, string username) {
-			if(matchPluginUrl(url))
-				return [ "access-control" ];
-
-			return [];
+			return matchPluginUrl(dav.path(url)) ? [ "access-control" ] : [];
 		}
 	}
-
 }

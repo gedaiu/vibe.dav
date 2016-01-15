@@ -120,55 +120,55 @@ interface ICalDavSchedulingProperties {
     <schedule-calendar-transp xmlns="urn:ietf:params:xml:ns:caldav" />
     <calendar-free-busy-set xmlns="urn:ietf:params:xml:ns:caldav" />*/
 }
-
-private bool matchPluginUrl(URL url, string username) {
-	if(username == "")
+private bool matchPluginUrl(Path path, string username) {
+	if(path.length < 2) {
 		return false;
+	}
 
-	string path = url.path.toString;
+	if(path[0] != "principals") {
+		return false;
+	}
 
-	string calendarsPath = "/principals/" ~ username ~ "/";
-	auto len = calendarsPath.length;
+	if(path[1] != username) {
+		return false;
+	}
 
-	if(path.length >= len && path[0..len] == calendarsPath)
-		return true;
-
-	return false;
+	return true;
 }
 
 class CalDavDataPlugin : BaseDavResourcePlugin, ICalDavProperties, IDavReportSetProperties, IDavBindingProperties {
 
 	string[] calendarHomeSet(DavResource resource) {
 
-		if(matchPluginUrl(resource.url, resource.username))
+		if(matchPluginUrl(resource.path, resource.username))
 			return [ "/principals/" ~ resource.username ~ "/calendars/" ];
 
 		throw new DavException(HTTPStatus.notFound, "not found");
 	}
 
 	string scheduleOutboxURL(DavResource resource) {
-		if(matchPluginUrl(resource.url, resource.username))
+		if(matchPluginUrl(resource.path, resource.username))
 			return "/principals/" ~ resource.username ~ "/outbox/";
 
 		throw new DavException(HTTPStatus.notFound, "not found");
 	}
 
 	string scheduleInboxURL(DavResource resource) {
-		if(matchPluginUrl(resource.url, resource.username))
+		if(matchPluginUrl(resource.path, resource.username))
 			return "/principals/" ~ resource.username ~ "/inbox/";
 
 		throw new DavException(HTTPStatus.notFound, "not found");
 	}
 
 	string[] calendarUserAddressSet(DavResource resource) {
-		if(matchPluginUrl(resource.url, resource.username))
+		if(matchPluginUrl(resource.path, resource.username))
 			return [ "mailto:" ~ resource.username ~ "@local.com" ];
 
 		throw new DavException(HTTPStatus.notFound, "not found");
 	}
 
 	string[] supportedReportSet(DavResource resource) {
-		if(matchPluginUrl(resource.url, resource.username))
+		if(matchPluginUrl(resource.path, resource.username))
 			return ["free-busy-query:urn:ietf:params:xml:ns:caldav", "calendar-query:urn:ietf:params:xml:ns:caldav", "calendar-multiget:urn:ietf:params:xml:ns:caldav"];
 
 		return [];
@@ -180,7 +180,7 @@ class CalDavDataPlugin : BaseDavResourcePlugin, ICalDavProperties, IDavReportSet
 
 	override {
 		bool canGetProperty(DavResource resource, string name) {
-			if(!matchPluginUrl(resource.url, resource.username))
+			if(!matchPluginUrl(resource.path, resource.username))
 				return false;
 
 			if(hasDavInterfaceProperty!ICalDavProperties(name))
@@ -196,7 +196,7 @@ class CalDavDataPlugin : BaseDavResourcePlugin, ICalDavProperties, IDavReportSet
 		}
 
 		DavProp property(DavResource resource, string name) {
-			if(!matchPluginUrl(resource.url, resource.username))
+			if(!matchPluginUrl(resource.path, resource.username))
 				throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
 
 			if(hasDavInterfaceProperty!ICalDavProperties(name))
@@ -242,14 +242,14 @@ class CalDavResourcePlugin : BaseDavResourcePlugin, ICalDavResourceProperties {
 	override {
 
 		bool canGetProperty(DavResource resource, string name) {
-			if(matchPluginUrl(resource.url, resource.username) && hasDavInterfaceProperty!ICalDavResourceProperties(name))
+			if(matchPluginUrl(resource.path, resource.username) && hasDavInterfaceProperty!ICalDavResourceProperties(name))
 				return true;
 
 			return false;
 		}
 
 		DavProp property(DavResource resource, string name) {
-			if(!matchPluginUrl(resource.url, resource.username))
+			if(!matchPluginUrl(resource.path, resource.username))
 				throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
 
 			if(hasDavInterfaceProperty!ICalDavResourceProperties(name))
@@ -313,14 +313,14 @@ class CalDavCollectionPlugin : BaseDavResourcePlugin, ICalDavCollectionPropertie
 	override {
 
 		bool canGetProperty(DavResource resource, string name) {
-			if(matchPluginUrl(resource.url, resource.username) && hasDavInterfaceProperty!ICalDavCollectionProperties(name))
+			if(matchPluginUrl(resource.path, resource.username) && hasDavInterfaceProperty!ICalDavCollectionProperties(name))
 				return true;
 
 			return false;
 		}
 
 		DavProp property(DavResource resource, string name) {
-			if(!matchPluginUrl(resource.url, resource.username))
+			if(!matchPluginUrl(resource.path, resource.username))
 				throw new DavException(HTTPStatus.internalServerError, "Can't get property.");
 
 			if(hasDavInterfaceProperty!ICalDavCollectionProperties(name))
@@ -347,7 +347,7 @@ class CalDavPlugin : BaseDavPlugin, ICalDavReports {
 
 		void bindResourcePlugins(DavResource resource) {
 
-			if(!matchPluginUrl(resource.url, resource.username))
+			if(!matchPluginUrl(resource.path, resource.username))
 				return;
 
 			resource.registerPlugin(new CalDavDataPlugin);
@@ -363,7 +363,7 @@ class CalDavPlugin : BaseDavPlugin, ICalDavReports {
 
 		bool hasReport(URL url, string username, string name) {
 
-			if(!matchPluginUrl(url, username))
+			if(!matchPluginUrl(dav.path(url), username))
 				return false;
 
 			if(hasDavReport!ICalDavReports(name))
@@ -373,7 +373,7 @@ class CalDavPlugin : BaseDavPlugin, ICalDavReports {
 		}
 
 		void report(DavRequest request, DavResponse response) {
-			if(!matchPluginUrl(request.url, request.username) || !hasDavReport!ICalDavReports(request.content.reportName))
+			if(!matchPluginUrl(dav.path(request.url), request.username) || !hasDavReport!ICalDavReports(request.content.reportName))
 				throw new DavException(HTTPStatus.internalServerError, "Can't get report.");
 
 			getDavReport!ICalDavReports(this, request, response);
@@ -426,11 +426,10 @@ class CalDavPlugin : BaseDavPlugin, ICalDavReports {
 		}
 
 		override string[] support(URL url, string username) {
-			if(matchPluginUrl(url, username))
+			if(matchPluginUrl(dav.path(url), username))
 				return [ "calendar-access" ];
 
 			return [];
 		}
 	}
 }
-

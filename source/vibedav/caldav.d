@@ -29,6 +29,22 @@ import std.uuid;
 
 import tested;
 
+private bool matchPluginUrl(Path path, string username) {
+	if(path.length < 2) {
+		return false;
+	}
+
+	if(path[0] != "principals") {
+		return false;
+	}
+
+	if(path[1] != username) {
+		return false;
+	}
+
+	return true;
+}
+
 interface ICalDavProperties {
 	@property {
 
@@ -107,7 +123,6 @@ interface ICalDavReports {
 	void calendarMultiget(DavRequest request, DavResponse response);
 }
 
-
 interface ICalDavSchedulingProperties {
 
 	// for Inbox
@@ -119,21 +134,6 @@ interface ICalDavSchedulingProperties {
     <supported-calendar-component-sets xmlns="urn:ietf:params:xml:ns:caldav" />
     <schedule-calendar-transp xmlns="urn:ietf:params:xml:ns:caldav" />
     <calendar-free-busy-set xmlns="urn:ietf:params:xml:ns:caldav" />*/
-}
-private bool matchPluginUrl(Path path, string username) {
-	if(path.length < 2) {
-		return false;
-	}
-
-	if(path[0] != "principals") {
-		return false;
-	}
-
-	if(path[1] != username) {
-		return false;
-	}
-
-	return true;
 }
 
 class CalDavDataPlugin : BaseDavResourcePlugin, ICalDavProperties, IDavReportSetProperties, IDavBindingProperties {
@@ -218,7 +218,6 @@ class CalDavDataPlugin : BaseDavResourcePlugin, ICalDavProperties, IDavReportSet
 		}
 	}
 }
-
 
 class CalDavResourcePlugin : BaseDavResourcePlugin, ICalDavResourceProperties {
 	string calendarData(DavResource resource) {
@@ -366,19 +365,34 @@ class CalDavPlugin : BaseDavPlugin, ICalDavReports {
 		return path.length == 3 && path[2] == "calendars";
 	}
 
+	bool isPrincipalCollection(Path path, string username) {
+		if(!matchPluginUrl(path, username))
+			return false;
+
+		return path.length == 2;
+	}
+
 	override {
 		bool exists(URL url, string username) {
 			return isCalendarsCollection(dav.path(url), username);
 		}
 
-		void bindResourcePlugins(DavResource resource) {
+		DavResource getResource(URL url, string username) {
+			if(isCalendarsCollection(dav.path(url), username)) {
+				DavResource resource = super.getResource(url, username);
+				resource.resourceType ~= "collection:DAV:";
 
+				return resource;
+			}
+
+			throw new DavException(HTTPStatus.internalServerError, "Can't get resource.");
+		}
+
+		void bindResourcePlugins(DavResource resource) {
 			if(!matchPluginUrl(resource.path, resource.username))
 				return;
 
-
-			if(isCalendarsCollection(resource.path, resource.username)) {
-				writeln("isCalendarsCollection(resource.path, resource.username) ===>", isCalendarsCollection(resource.path, resource.username));
+			if(isPrincipalCollection(resource.path, resource.username)) {
 				resource.registerPlugin(new CalDavPrincipalCollectionPlugin);
 			}
 

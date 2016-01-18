@@ -313,7 +313,6 @@ class FileDav : BaseDavPlugin {
 		}
 
 		void setResourceInfoProperties(DavResource resource) {
-
 			string path = filePath(resource.url).toString;
 
 			assert(path.exists);

@@ -538,7 +538,8 @@ class DavResource : IDavResourcePluginHub {
 
 		resourceType = [];
 
-		string strUrl = url.toString;
+		creationDate = Clock.currTime;
+		lastModified = Clock.currTime;
 	}
 
 	private {

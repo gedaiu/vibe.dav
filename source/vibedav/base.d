@@ -219,6 +219,15 @@ abstract class BaseDavPlugin : IDavPlugin {
 	}
 
 	DavResource getResource(URL url, string username) {
+		if(exists(url, username)) {
+			auto resource = new DavResource(_dav, url);
+
+			resource.name = url.path.head.to!string;
+			resource.username = username;
+
+			return resource;
+		}
+
 		throw new DavException(HTTPStatus.internalServerError, "Can't get resource.");
 	}
 

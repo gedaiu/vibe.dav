@@ -42,6 +42,41 @@ private bool matchPluginUrl(Path path) {
 	return strPath.length >= len && strPath[0..len] == "principals/";
 }
 
+class ACLDavRootCollectionPlugin : BaseDavResourcePlugin {
+
+	bool[string] getChildren(DavResource resource) {
+		bool[string] list;
+		list[resource.rootURL ~ "principals/"] = true;
+
+		return list;
+	}
+
+	@property {
+		string name() {
+			return "ACLDavRootCollectionPlugin";
+		}
+	}
+}
+
+class ACLDavUserCollectionPlugin : BaseDavResourcePlugin {
+
+	bool[string] getChildren(DavResource resource) {
+		bool[string] list;
+
+		if(resource.username != "") {
+			list[resource.rootURL ~ "principals/" ~ resource.username ~ "/"] = true;
+		}
+
+		return list;
+	}
+
+	@property {
+		string name() {
+			return "ACLDavUserCollectionPlugin";
+		}
+	}
+}
+
 class ACLDavResourcePlugin : ACLDavProperties, IDavResourcePlugin, IDavReportSetProperties {
 
 	string currentUserPrincipal(DavResource resource) {
@@ -160,8 +195,48 @@ class ACLDavPlugin : BaseDavPlugin {
 		super(dav);
 	}
 
-	override void bindResourcePlugins(DavResource resource) {
-		resource.registerPlugin(new ACLDavResourcePlugin);
+	bool isPrincipalsCollection(Path path) {
+		return matchPluginUrl(path) && path.length == 1;
+	}
+
+	bool isUserCollection(Path path, string username) {
+		return matchPluginUrl(path) && path.head == username && path.length == 2;
+	}
+
+	bool isRootCollection(Path path) {
+		return path.length == 0;
+	}
+
+	override {
+		bool exists(URL url, string username) {
+			return isPrincipalsCollection(dav.path(url)) || isUserCollection(dav.path(url), username);
+		}
+
+		void bindResourcePlugins(DavResource resource) {
+			if(isRootCollection(resource.path)) {
+				resource.registerPlugin(new ACLDavRootCollectionPlugin);
+			}
+
+			if(isPrincipalsCollection(resource.path)) {
+				resource.registerPlugin(new ACLDavUserCollectionPlugin);
+			}
+
+			resource.registerPlugin(new ACLDavResourcePlugin);
+
+			//if(!matchPluginUrl(resource.path, resource.username))
+			//	return;
+		}
+
+		DavResource getResource(URL url, string username) {
+			if(isPrincipalsCollection(dav.path(url)) || isUserCollection(dav.path(url), username)) {
+				DavResource resource = super.getResource(url, username);
+				resource.resourceType ~= "collection:DAV:";
+
+				return resource;
+			}
+
+			throw new DavException(HTTPStatus.internalServerError, "Can't get resource.");
+		}
 	}
 
 	@property {

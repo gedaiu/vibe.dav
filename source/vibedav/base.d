@@ -426,17 +426,19 @@ class Dav : IDav {
 			auto oldLen = tmpList.length;
 
 			foreach(resource; tmpList) {
-				auto childList = childList(url, username);
+				if(resource.isCollection) {
+					auto childList = childList(resource.url, username);
 
-				foreach(path; childList) {
-					try {
-						tmpList ~= getResource(URL("http", "", 80, Path("/") ~_rootUrl ~ path), username);
-					} catch(DavException e) {
-						if(e.status == HTTPStatus.notFound) {
-							throw new DavException(HTTPStatus.internalServerError,
-								"Resource `" ~ url.to!string ~ "` said that it has `" ~ path.toString ~ "` child but it can not be found.");
-						} else {
-							throw e;
+					foreach(path; childList) {
+						try {
+							tmpList ~= getResource(URL("http", "", 80, Path("/") ~_rootUrl ~ path), username);
+						} catch(DavException e) {
+							if(e.status == HTTPStatus.notFound) {
+								throw new DavException(HTTPStatus.internalServerError,
+									"Resource `" ~ url.to!string ~ "` said that it has `" ~ path.toString ~ "` child but it can not be found.");
+							} else {
+								throw e;
+							}
 						}
 					}
 				}
@@ -750,16 +752,15 @@ class Dav : IDav {
 	void copy(DavRequest request, DavResponse response) {
 		string username = request.username;
 
-		URL getDestinationUrl(DavResource source) {
-			auto sourceUrl = source.url;
-			sourceUrl.host = request.url.host;
-			sourceUrl.schema = request.url.schema;
-			sourceUrl.port = request.url.port;
+		URL getDestinationUrl(DavResource source) const {
+			auto path = request.url.path;
+			auto sourcePath = source.url.path[path.length..$];
+			auto destinationPath = request.destination.path ~ sourcePath;
 
-			string strSrcUrl = request.url.toString;
-			string strDestUrl = request.destination.toString;
+			auto url = source.url;
+			url.path = destinationPath;
 
-			return URL(strDestUrl ~ sourceUrl.toString[strSrcUrl.length..$]);
+			return url;
 		}
 
 		void localCopy(DavResource source, DavResource destination) {
@@ -769,9 +770,9 @@ class Dav : IDav {
 				foreach(child; list) {
 					auto destinationUrl = getDestinationUrl(child);
 
-					if(child.isCollection && !exists(destinationUrl, username))
+					if(child.isCollection && !exists(destinationUrl, username)) {
 						createCollection(getDestinationUrl(child), username);
-					else if(!child.isCollection) {
+					} else if(!child.isCollection) {
 						HTTPStatus statusCode;
 						DavResource destinationChild = getOrCreateResource(getDestinationUrl(child), username, statusCode);
 						destinationChild.setContent(child.stream, child.contentLength);
@@ -796,7 +797,6 @@ class Dav : IDav {
 		if(!request.overwrite && exists(request.destination, username))
 			throw new DavException(HTTPStatus.preconditionFailed, "Destination already exists.");
 
-		response.statusCode = HTTPStatus.created;
 		if(exists(request.destination, username))
 			destination = getResource(request.destination, username);
 
@@ -808,6 +808,10 @@ class Dav : IDav {
 			destinationUrl.path = destinationUrl.path ~ source.url.path.head;
 			destination = null;
 			response.statusCode = HTTPStatus.noContent;
+		}
+
+		if(destination !is null && !destination.isCollection && source.isCollection) {
+			removeResource(destinationUrl, username);
 		}
 
 		if(destination is null) {

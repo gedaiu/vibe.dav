@@ -375,6 +375,7 @@ class FileDav : BaseDavPlugin {
 		DavResource createCollection(URL url, string username) {
 			auto filePath = filePath(url);
 
+      writeln("==>", filePath, "==> ", filePath.toString.exists);
 			if(filePath.toString.exists)
 				throw new DavException(HTTPStatus.methodNotAllowed, "Resource already exists.");
 

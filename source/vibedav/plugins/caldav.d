@@ -356,17 +356,17 @@ class CalDavPlugin : BaseDavPlugin, ICalDavReports {
 		return path.length == 2;
 	}
 
-	Path[] childList(DavResource resource) {
-		if (isPrincipalCollection(resource.path, resource.username)) {
-			return [ Path("principals/" ~ resource.username ~ "/calendars/") ];
-		}
-
-		return [];
-	}
-
 	override {
 		bool exists(URL url, string username) {
 			return isCalendarsCollection(dav.path(url), username);
+		}
+
+		Path[] childList(URL url, string username) {
+			if (isPrincipalCollection(dav.path(url), username)) {
+				return [ Path("principals/" ~ username ~ "/calendars/") ];
+			}
+
+			return [];
 		}
 
 		DavResource getResource(URL url, string username) {

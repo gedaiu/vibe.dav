@@ -78,8 +78,8 @@ FileStream toStream(string path) {
 	return openFile(path);
 }
 
-bool[string] getFolderContent(string format = "*")(string path, Path rootPath, Path rootUrl) {
-	bool[string] list;
+Path[] getFolderContent(string format = "*")(string path, Path rootPath, Path rootUrl) {
+	Path[] list;
 	rootPath.endsWithSlash = true;
 	string strRootPath = rootPath.toString;
 
@@ -87,20 +87,17 @@ bool[string] getFolderContent(string format = "*")(string path, Path rootPath, P
 	p.endsWithSlash = true;
 	path = p.toString;
 
-	enforce(path.isDir);
+	enforce(path.isDir, "I was expecting to get a dir content");
 	enforce(strRootPath.length <= path.length);
 	enforce(strRootPath == path[0..strRootPath.length]);
 
 	auto fileList = dirEntries(path, format, SpanMode.shallow);
 
-	foreach(file; fileList) {
-		auto filePath = rootUrl ~ file[strRootPath.length..$];
+  foreach(file; fileList) {
+		auto filePath = Path(file[strRootPath.length..$]);
 		filePath.endsWithSlash = false;
 
-		if(file.isDir)
-			list[filePath.toString] = true;
-		else
-			list[filePath.toString] = false;
+    list ~= filePath;
 	}
 
 	return list;
@@ -141,17 +138,6 @@ class DirectoryResourcePlugin : IDavResourcePlugin {
 		bool canRemoveProperty(DavResource resource, string name) {
 			return false;
 		}
-	}
-
-	bool[string] getChildren(DavResource resource) {
-		bool[string] list;
-
-		auto nativePath = filePath(resource.url).toString;
-
-		if(nativePath.exists)
-			list = getFolderContent!"*"(nativePath, basePath, baseUrlPath);
-
-		return list;
 	}
 
 	void setContent(DavResource resource, const ubyte[] content) {
@@ -223,11 +209,6 @@ class FileResourcePlugin : IDavResourcePlugin {
 
 	bool canRemoveProperty(DavResource resource, string name) {
 		return false;
-	}
-
-	bool[string] getChildren(DavResource resource) {
-		bool[string] list;
-		return list;
 	}
 
 	void setContent(DavResource resource, const ubyte[] content) {
@@ -336,6 +317,19 @@ class FileDav : BaseDavPlugin {
 
 			return filePath.toString.exists;
 		}
+
+
+  	Path[] childList(URL url, string username) {
+  		Path[] list;
+
+  		auto nativePath = filePath(url).toString;
+
+  		if(nativePath.exists)
+  			list = getFolderContent!"*"(nativePath, basePath, baseUrlPath);
+
+  		return list;
+  	}
+
 
 		bool canCreateResource(URL url, string username) {
 			return !exists(url, username);

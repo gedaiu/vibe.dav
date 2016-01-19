@@ -29,6 +29,7 @@ import std.string;
 import std.stdio;
 import std.typecons;
 import std.uri;
+import std.algorithm.sorting, std.algorithm.setops;
 import tested;
 
 class DavStorage {
@@ -162,6 +163,7 @@ void getDavReport(I)(I plugin, DavRequest request, DavResponse response) {
 
 interface IDavResourceAccess {
 	bool exists(URL url, string username);
+	Path[] childList(URL url, string username);
 	bool canCreateCollection(URL url, string username);
 	bool canCreateResource(URL url, string username);
 
@@ -200,6 +202,10 @@ abstract class BaseDavPlugin : IDavPlugin {
 	this(IDav dav) {
 		dav.registerPlugin(this);
 		_dav = dav;
+	}
+
+	Path[] childList(URL url, string username) {
+		return [];
 	}
 
 	bool exists(URL url, string username) {
@@ -420,15 +426,15 @@ class Dav : IDav {
 			auto oldLen = tmpList.length;
 
 			foreach(resource; tmpList) {
-				bool[string] childList = resource.getChildren();
+				auto childList = childList(url, username);
 
-				foreach(string key, bool val; childList) {
+				foreach(path; childList) {
 					try {
-						tmpList ~= getResource(URL("http://a/" ~ key), username);
+						tmpList ~= getResource(URL("http", "", 80, Path("/") ~_rootUrl ~ path), username);
 					} catch(DavException e) {
 						if(e.status == HTTPStatus.notFound) {
 							throw new DavException(HTTPStatus.internalServerError,
-								"Resource `" ~ url.to!string ~ "` said that it has `" ~ key ~ "` child but it can not be found.");
+								"Resource `" ~ url.to!string ~ "` said that it has `" ~ path.toString ~ "` child but it can not be found.");
 						} else {
 							throw e;
 						}
@@ -476,8 +482,6 @@ class Dav : IDav {
 
 	void bindResourcePlugins(DavResource resource) {
 		foreach(plugin; plugins) {
-			writeln("plugin-->", plugin.name);
-
 			plugin.bindResourcePlugins(resource);
 		}
 	}
@@ -489,6 +493,18 @@ class Dav : IDav {
 		}
 
 		return false;
+	}
+
+	Path[] childList(URL url, string username) {
+		bool[Path] childs;
+
+		foreach_reverse(plugin; plugins) {
+			foreach(item; plugin.childList(url, username)) {
+				childs[item] = true;
+			}
+		}
+
+		return childs.keys;
 	}
 
 	bool canCreateCollection(URL url, string username) {

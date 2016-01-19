@@ -322,7 +322,6 @@ interface IDavResourcePlugin {
 	bool canSetProperty(DavResource resource, string name);
 	bool canRemoveProperty(DavResource resource, string name);
 
-	bool[string] getChildren(DavResource resource);
 	void setContent(DavResource resource, const ubyte[] content);
 	void setContent(DavResource resource, InputStream content, ulong size);
 	InputStream stream(DavResource resource);
@@ -357,11 +356,6 @@ abstract class BaseDavResourcePlugin : IDavResourcePlugin {
 
 	bool canGetProperty(DavResource resource, string name) {
 		return false;
-	}
-
-	bool[string] getChildren(DavResource resource) {
-		bool[string] list;
-		return list;
 	}
 
 	void setContent(DavResource resource, const ubyte[] content) {
@@ -676,15 +670,6 @@ class DavResource : IDavResourcePluginHub {
 		parent.addChild(item);
 	}
 
-	bool hasChild(Path path) {
-		auto childList = getChildren;
-
-		if(path.to!string in childList)
-				return true;
-
-		return false;
-	}
-
 	string propPatch(DavProp document) {
 		string description;
 		string result = `<?xml version="1.0" encoding="utf-8" ?><d:multistatus xmlns:d="DAV:"><d:response>`;
@@ -724,19 +709,6 @@ class DavResource : IDavResourcePluginHub {
 		result ~= `</d:response></d:multistatus>`;
 
 		return result;
-	}
-
-	bool[string] getChildren() {
-		bool[string] list;
-
-		foreach_reverse(plugin; plugins) {
-			auto tmpList = plugin.getChildren(this);
-
-			foreach(string key, bool value; tmpList)
-				list[key] = value;
-		}
-
-		return list;
 	}
 
 	void copyPropertiesTo(URL destination) {

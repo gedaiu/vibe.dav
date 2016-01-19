@@ -266,22 +266,6 @@ class CalDavResourcePlugin : BaseDavResourcePlugin, ICalDavResourceProperties {
 	}
 }
 
-class CalDavPrincipalCollectionPlugin : BaseDavResourcePlugin {
-	override {
-		bool[string] getChildren(DavResource resource) {
-			bool[string] list;
-			string path = resource.rootURL ~ "principals/" ~ resource.username ~ "/calendars/";
-			list[path] = true;
-			return list;
-		}
-	}
-	@property {
-		string name() {
-			return "CalDavPrincipalCollectionPlugin";
-		}
-	}
-}
-
 class CalDavCollectionPlugin : BaseDavResourcePlugin, ICalDavCollectionProperties {
 
 	string calendarDescription(DavResource resource) {
@@ -372,6 +356,14 @@ class CalDavPlugin : BaseDavPlugin, ICalDavReports {
 		return path.length == 2;
 	}
 
+	Path[] childList(DavResource resource) {
+		if (isPrincipalCollection(resource.path, resource.username)) {
+			return [ Path("principals/" ~ resource.username ~ "/calendars/") ];
+		}
+
+		return [];
+	}
+
 	override {
 		bool exists(URL url, string username) {
 			return isCalendarsCollection(dav.path(url), username);
@@ -391,10 +383,6 @@ class CalDavPlugin : BaseDavPlugin, ICalDavReports {
 		void bindResourcePlugins(DavResource resource) {
 			if(!matchPluginUrl(resource.path, resource.username))
 				return;
-
-			if(isPrincipalCollection(resource.path, resource.username)) {
-				resource.registerPlugin(new CalDavPrincipalCollectionPlugin);
-			}
 
 			resource.registerPlugin(new CalDavDataPlugin);
 			auto path = resource.url.path.toString.stripSlashes;

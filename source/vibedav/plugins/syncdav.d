@@ -71,7 +71,7 @@ class SyncDavPlugin : BaseDavPlugin, ISyncDavReports {
 
 	struct Change {
 		Path path;
-		string type;
+		NoticeAction type;
 		SysTime time;
 	}
 
@@ -136,7 +136,7 @@ class SyncDavPlugin : BaseDavPlugin, ISyncDavReports {
 			foreach(i; token..changeNr-1) {
 				auto change = log[i];
 
-				wasRemoved[change.path.toString] = (change.type == "deleted");
+				wasRemoved[change.path.toString] = (change.type == NoticeAction.deleted);
 			}
 
 			return wasRemoved;
@@ -196,11 +196,9 @@ class SyncDavPlugin : BaseDavPlugin, ISyncDavReports {
 				resource.registerPlugin(new SyncDavDataPlugin(this));
 		}
 
-		void notice(string action, DavResource resource) {
-			if(action == "created" || action == "deleted" || action == "changed") {
-				changeNr++;
-				log ~= Change(resource.url.path, action, Clock.currTime);
-			}
+		void notice(NoticeAction action, DavResource resource) {
+			changeNr++;
+			log ~= Change(resource.url.path, action, Clock.currTime);
 		}
 	}
 

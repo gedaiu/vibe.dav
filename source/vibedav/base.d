@@ -59,6 +59,13 @@ class DavException : Exception {
 	}
 }
 
+
+enum NoticeAction {
+	created,
+	deleted,
+	changed
+}
+
 string stripSlashes(string path) {
 	return path.stripBeginSlashes.stripEndSlasshes;
 }
@@ -180,7 +187,7 @@ interface IDavPlugin : IDavResourceAccess {
 	bool hasReport(URL url, string username, string name);
 	void report(DavRequest request, DavResponse response);
 
-	void notice(string action, DavResource resource);
+	void notice(NoticeAction action, DavResource resource);
 
 	@property {
 		IDav dav();
@@ -255,7 +262,7 @@ abstract class BaseDavPlugin : IDavPlugin {
 		throw new DavException(HTTPStatus.internalServerError, "Can't get report.");
 	}
 
-	void notice(string action, DavResource resource) {
+	void notice(NoticeAction action, DavResource resource) {
 
 	}
 
@@ -283,7 +290,7 @@ interface IDav : IDavResourceAccess, IDavPluginHub {
 	void copy(DavRequest request, DavResponse response);
 	void report(DavRequest request, DavResponse response);
 
-	void notice(string action, DavResource resource);
+	void notice(NoticeAction action, DavResource resource);
 
 	DavResource[] getResources(URL url, ulong depth, string username);
 
@@ -396,7 +403,7 @@ class Dav : IDav {
 	void removeResource(URL url, string username) {
 		foreach_reverse(plugin; plugins)
 			if(plugin.exists(url, username)) {
-				notice("deleted", getResource(url, username));
+				notice(NoticeAction.deleted, getResource(url, username));
 				return plugin.removeResource(url, username);
 			}
 
@@ -460,7 +467,7 @@ class Dav : IDav {
 				auto res = plugin.createCollection(url, username);
 				bindResourcePlugins(res);
 
-				notice("created", res);
+				notice(NoticeAction.created, res);
 
 				return res;
 			}
@@ -474,7 +481,7 @@ class Dav : IDav {
 				auto res = plugin.createResource(url, username);
 				bindResourcePlugins(res);
 
-				notice("created", res);
+				notice(NoticeAction.created, res);
 
 				return res;
 			}
@@ -566,7 +573,7 @@ class Dav : IDav {
 		DavStorage.locks.check(request.url, ifHeader);
 		DavResource resource = getResource(request.url, request.username);
 
-		notice("changed", resource);
+		notice(NoticeAction.changed, resource);
 
 		auto xmlString = resource.propPatch(request.content);
 
@@ -691,7 +698,7 @@ class Dav : IDav {
 		DavStorage.locks.check(request.url, request.ifCondition);
 
 		resource.setContent(request.stream, request.contentLength);
-		notice("changed", resource);
+		notice(NoticeAction.changed, resource);
 
 		DavStorage.locks.setETag(resource.url, resource.eTag);
 
@@ -713,7 +720,7 @@ class Dav : IDav {
 
 		response.statusCode = HTTPStatus.created;
 		createCollection(request.url, request.username);
-		notice("created", getResource(request.url, request.username));
+		notice(NoticeAction.created, getResource(request.url, request.username));
 		response.flush;
 	}
 
@@ -822,12 +829,12 @@ class Dav : IDav {
 		}
 
 		localCopy(source, destination);
-		notice("changed", destination);
+		notice(NoticeAction.changed, destination);
 
 		response.flush;
 	}
 
-	void notice(string action, DavResource resource) {
+	void notice(NoticeAction action, DavResource resource) {
 		foreach_reverse(plugin; plugins)
 			plugin.notice(action, resource);
 	}

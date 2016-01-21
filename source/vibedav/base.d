@@ -648,31 +648,19 @@ class Dav : IDav {
 	void get(DavRequest request, DavResponse response) {
 		DavResource resource = getResource(request.url, request.username);
 
-		writeln("a1");
-
 		response["Etag"] = "\"" ~ resource.eTag ~ "\"";
-				writeln("a2");
 		response["Last-Modified"] = toRFC822DateTimeString(resource.lastModified);
-				writeln("a3");
 		response["Content-Type"] = resource.contentType;
-				writeln("a4");
 		response["Content-Length"] = resource.contentLength.to!string;
 
-		writeln("a5");
 		if(!request.ifModifiedSince(resource) || !request.ifNoneMatch(resource)) {
-				writeln("a6");
 			response.statusCode = HTTPStatus.NotModified;
-				writeln("a7");
 			response.flush;
-				writeln("a8");
 			return;
 		}
 
-		writeln("a9");
 		response.flush(resource);
-		writeln("a10");
 		DavStorage.locks.setETag(resource.url, resource.eTag);
-		writeln("a11");
 	}
 
 	void head(DavRequest request, DavResponse response) {

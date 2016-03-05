@@ -329,7 +329,7 @@ class Dav : IDav {
 	}
 
 	protected {
-		DavResource getOrCreateResource(URL url, string username, out int status) {
+		DavResource getOrCreateResource(URL url, string username, out HTTPStatus status) {
 			DavResource resource;
 
 			if(exists(url, username)) {

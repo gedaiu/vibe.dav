@@ -5,11 +5,8 @@
 	"authors": ["Szabo Bogdan"],
 	"license": "MIT",
 	"dependencies": {
-		"vibe-d": {
-      "version": ">=0.7.26",
-      "path": "../vibe.d"
-    },
-		"tested": "~master"
+		"vibe-d": "~>0.7.28",
+		"tested": "~>0.9.4"
 	},
 
 	"targetType": "library"

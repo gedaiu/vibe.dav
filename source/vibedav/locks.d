@@ -83,6 +83,8 @@ class DavLockInfo {
 	}
 
 	override string toString() {
+		import std.conv : to;
+		
 		string a = `<d:activelock>`;
 
 		if(isWrite)

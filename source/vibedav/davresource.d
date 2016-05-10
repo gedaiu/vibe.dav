@@ -18,6 +18,7 @@ import vibe.http.router : URLRouter;
 import vibe.stream.operations;
 import vibe.internal.meta.uda;
 
+import std.conv : to;
 import std.stdio;
 import std.datetime;
 import std.string;

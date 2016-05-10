@@ -9,6 +9,7 @@ module vibedav.http;
 import vibedav.base;
 
 import std.datetime;
+import std.stdio : writeln;
 import std.string;
 
 import vibe.http.server;
@@ -171,6 +172,8 @@ struct DavResponse {
 	}
 
 	void setPropContent (DavResource[] list, bool[string] props, HTTPStatus[string] responseCodes = null) {
+		import std.conv : to;
+
 		statusCode = HTTPStatus.multiStatus;
 		mimeType = "application/xml";
 
@@ -230,6 +233,7 @@ struct DavRequest {
 		}
 
 		ulong contentLength() {
+			import std.conv : to;
 
 			string value = "0";
 
@@ -284,6 +288,8 @@ struct DavRequest {
 		}
 
 		Duration timeout() {
+			import std.conv : to;
+			
 			Duration t;
 
 			string strTimeout = getHeader!"Timeout"(request.headers);

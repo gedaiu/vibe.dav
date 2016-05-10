@@ -79,6 +79,8 @@ FileStream toStream(string path) {
 }
 
 Path[] getFolderContent(string format = "*")(string path, Path rootPath, Path rootUrl) {
+	import std.exception : enforce;
+	
 	Path[] list;
 	rootPath.endsWithSlash = true;
 	string strRootPath = rootPath.toString;

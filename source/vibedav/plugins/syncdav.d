@@ -40,6 +40,7 @@ class SyncDavDataPlugin : BaseDavResourcePlugin, ISyncDavProperties {
 	}
 
 	string syncToken(DavResource resource) {
+		import std.conv : to;
 		return SyncDavPlugin.prefix ~ _syncPlugin.currentChangeNr.to!string;
 	}
 
@@ -87,6 +88,8 @@ class SyncDavPlugin : BaseDavPlugin, ISyncDavReports {
 	protected {
 
 		ulong getToken(DavProp[] syncTokenList) {
+			import std.conv : to;
+
 			if(syncTokenList.length == 0)
 				return 0;
 
@@ -114,6 +117,8 @@ class SyncDavPlugin : BaseDavPlugin, ISyncDavReports {
 		}
 
 		ulong getLevel(DavProp[] syncLevelList) {
+			import std.conv : to;
+			
 			if(syncLevelList.length == 0)
 				return 0;
 

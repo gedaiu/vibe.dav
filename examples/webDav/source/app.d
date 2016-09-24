@@ -8,10 +8,10 @@ import vibe.http.router : URLRouter;
 import vibe.http.server;
 import vibe.http.auth.basic_auth;
 
-import vibedav.filedav;
-import vibedav.acldav;
-import vibedav.caldav;
-import vibedav.syncdav;
+import vibedav.plugins.filedav;
+import vibedav.plugins.acldav;
+import vibedav.plugins.caldav;
+import vibedav.plugins.syncdav;
 
 import core.time;
 import std.stdio;
@@ -19,6 +19,7 @@ import std.functional : toDelegate;
 
 bool checkPassword(string user, string password)
 {
+	writeln("user: ", user, " pass: ", password);
 	return user == "admin" && password == "secret";
 }
 

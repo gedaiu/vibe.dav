@@ -31,6 +31,8 @@ import std.stdio;
 import std.typecons;
 import std.uri;
 import std.uuid;
+import std.exception;
+
 static if (__traits(compiles, { import std.algorithm.comparison : max; }))
     import std.algorithm.comparison : max;
 else

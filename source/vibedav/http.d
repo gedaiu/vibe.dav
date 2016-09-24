@@ -10,6 +10,7 @@ import vibedav.base;
 
 import std.datetime;
 import std.string;
+import std.conv;
 
 import vibe.http.server;
 import vibe.inet.message;
@@ -19,6 +20,9 @@ import vibe.utils.dictionarylist;
 
 import tested;
 
+debug {
+	import std.stdio;
+}
 
 alias HeaderList = DictionaryList!(string, false, 12L, false);
 
@@ -158,14 +162,12 @@ struct DavResponse {
 	}
 
 	void flush() {
-		writeln("1.FLUSH!!!!");
 		response.statusCode = statusCode;
 		debug writeln("\n", _content);
 		response.writeBody(_content, response.headers["Content-Type"]);
 	}
 
 	void flush(DavResource resource) {
-		writeln("2.FLUSH!!!!", resource.contentLength);
 		response.statusCode = statusCode;
 		response.writeRawBody(resource.stream, resource.contentLength);
 	}

@@ -12,6 +12,7 @@ import vibedav.ifheader;
 import std.datetime;
 import std.uuid;
 import std.string;
+import std.conv;
 
 import vibe.core.log;
 import vibe.core.file;

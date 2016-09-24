@@ -39,6 +39,6 @@ shared static this()
 
 	auto settings = new HTTPServerSettings;
 	settings.port = 8080;
-	settings.bindAddresses = ["::1", "127.0.0.1", "192.168.0.13", "192.168.0.100"];
+	settings.bindAddresses = ["::1", "127.0.0.1","0.0.0.0", "192.168.0.13", "192.168.0.100"];
 	listenHTTP(settings, router);
 }

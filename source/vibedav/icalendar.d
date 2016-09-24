@@ -10,16 +10,21 @@ import tested;
 import std.string;
 import std.stdio;
 
-private mixin template vAccessTpl() {
-	private {
+private mixin template vAccessTpl()
+{
+	private
+	{
 		string[string] uniqueValues;
 		string[][string] optionalValues;
 
-		bool setUnique(string value, string key) {
-			foreach(k; OptionalUnique) {
-				if(key == k) {
-					if(k in uniqueValues)
-						throw new Exception("Key is `"~key~"` already set.");
+		bool setUnique(string value, string key)
+		{
+			foreach (k; OptionalUnique)
+			{
+				if (key == k)
+				{
+					if (k in uniqueValues)
+						throw new Exception("Key is `" ~ key ~ "` already set.");
 
 					uniqueValues[key] = value;
 					return true;
@@ -29,32 +34,37 @@ private mixin template vAccessTpl() {
 			return false;
 		}
 
-		bool setOptional(string value, string key) {
-			foreach(k; Optional) {
-				if(key == k) {
+		bool setOptional(string value, string key)
+		{
+			foreach (k; Optional)
+			{
+				if (key == k)
+				{
 					optionalValues[key] ~= value;
 					return true;
 				}
 			}
 
-			if(key.length > 2 && key[0..2] == "X-")
+			if (key.length > 2 && key[0 .. 2] == "X-")
 				return true;
 
 			return false;
 		}
 
-		bool setOptionalOr(string value, string key) {
+		bool setOptionalOr(string value, string key)
+		{
 			bool exists;
 
-			foreach(k; OptionalOr) {
-				if(k in uniqueValues)
+			foreach (k; OptionalOr)
+			{
+				if (k in uniqueValues)
 					return false;
 
-				if(k == key)
+				if (k == key)
 					exists = true;
 			}
 
-			if(!exists)
+			if (!exists)
 				return false;
 
 			uniqueValues[key] = value;
@@ -62,89 +72,71 @@ private mixin template vAccessTpl() {
 			return true;
 		}
 
-		string asString(string type)() {
+		string asString(string type)()
+		{
 			string a;
 
-			foreach(key, value; uniqueValues)
+			foreach (key, value; uniqueValues)
 				a ~= key ~ ":" ~ value ~ "\n";
 
-			foreach(key, valueList; optionalValues)
-				foreach(value; valueList)
+			foreach (key, valueList; optionalValues)
+				foreach (value; valueList)
 					a ~= key ~ ":" ~ value ~ "\n";
 
-			return "BEGIN:"~type~"\n" ~ a ~ "END:" ~ type;
+			return "BEGIN:" ~ type ~ "\n" ~ a ~ "END:" ~ type;
 		}
 	}
 
-    void opIndexAssign(string value, string key) {
-    	if(!setUnique(value, key) && !setOptional(value, key) && !setOptionalOr(value, key))
-    		throw new Exception("Invalid key `"~key~"`");
-    }
+	void opIndexAssign(string value, string key)
+	{
+		if (!setUnique(value, key) && !setOptional(value, key) && !setOptionalOr(value, key))
+			throw new Exception("Invalid key `" ~ key ~ "`");
+	}
 
-    string opIndex(string key) {
-    	return uniqueValues[key];
-    }
+	string opIndex(string key)
+	{
+		return uniqueValues[key];
+	}
 
-    void remove(string key) {
-    	optionalValues.remove(key);
-    }
+	void remove(string key)
+	{
+		optionalValues.remove(key);
+	}
 }
 
-struct vEvent {
+struct vEvent
+{
 	/// the following are optional,
-    /// but MUST NOT occur more than once
-    enum OptionalUnique = [
-    	"CLASS",
-    	"CREATED",
-    	"DESCRIPTION",
-    	"DTSTART",
-    	"GEO",
-    	"LAST-MOD",
-    	"LOCATION",
-    	"ORGANIZER",
-    	"PRIORITY",
-    	"DTSTAMP",
-    	"SEQ",
-    	"STATUS",
-    	"SUMMARY",
-    	"TRANSP",
-    	"UID",
-    	"URL",
-    	"RECURID",
-		"SEQUENCE"
-    ];
+	/// but MUST NOT occur more than once
+	enum OptionalUnique = [
+			"CLASS", "CREATED", "DESCRIPTION", "DTSTART", "GEO", "LAST-MOD", "LOCATION", "ORGANIZER",
+			"PRIORITY", "DTSTAMP", "SEQ", "STATUS", "SUMMARY", "TRANSP", "UID",
+			"URL", "RECURID", "SEQUENCE"
+		];
 
-    //either 'dtend' or 'duration' may appear in
-    //a 'eventprop', but 'dtend' and 'duration'
-    //MUST NOT occur in the same 'eventprop'
-	enum string[] OptionalOr = [ "DTEND", "DURATION" ];
+	//either 'dtend' or 'duration' may appear in
+	//a 'eventprop', but 'dtend' and 'duration'
+	//MUST NOT occur in the same 'eventprop'
+	enum string[] OptionalOr = ["DTEND", "DURATION"];
 
-     /// the following are optional,
-    /// and MAY occur more than once
-    enum Optional = [
-    	"ATTACH",
-    	"ATTENDEE",
-    	"CATEGORIES",
-    	"COMMENT",
-    	"CONTACT",
-    	"EXDATE",
-    	"EXRULE",
-    	"RSTATUS",
-    	"RELATED",
-    	"RESOURCES",
-    	"RDATE",
-    	"RRULE"
-    ];
+	/// the following are optional,
+	/// and MAY occur more than once
+	enum Optional = [
+			"ATTACH", "ATTENDEE", "CATEGORIES", "COMMENT", "CONTACT", "EXDATE",
+			"EXRULE", "RSTATUS", "RELATED", "RESOURCES", "RDATE", "RRULE"
+		];
 
-    mixin vAccessTpl;
+	mixin vAccessTpl;
 
-    string toString() {
-    	return asString!"VEVENT";
-    }
+	string toString()
+	{
+		return asString!"VEVENT";
+	}
 }
 
 @name("Set unique property")
-unittest {
+unittest
+{
 	vEvent event;
 
 	event["CLASS"] = "value";
@@ -153,15 +145,19 @@ unittest {
 }
 
 @name("Set unique property twice throw Exception")
-unittest {
+unittest
+{
 	vEvent event;
 
 	bool failed;
 
 	event["CLASS"] = "value1";
-	try {
+	try
+	{
 		event["CLASS"] = "value2";
-	} catch(Exception e) {
+	}
+	catch (Exception e)
+	{
 		failed = true;
 	}
 
@@ -170,7 +166,8 @@ unittest {
 }
 
 @name("Set optional properties")
-unittest {
+unittest
+{
 	vEvent event;
 
 	event["ATTACH"] = "value1";
@@ -178,190 +175,134 @@ unittest {
 	assert(event.toString == "BEGIN:VEVENT\nATTACH:value1\nATTACH:value2\nEND:VEVENT");
 }
 
-struct vTodo {
+struct vTodo
+{
 	/// the following are optional,
-    /// but MUST NOT occur more than once
-    enum OptionalUnique = [
-	    "CLASS",
-	    "COMPLETED",
-	    "CREATED",
-	    "DESCRIPTION",
-	    "DTSTAMP",
-	    "DTSTART",
-	    "GEO",
-	    "LAST-MOD",
-	    "LOCATION",
-	    "ORGANIZER",
-	    "PERCENT",
-	    "PRIORITY",
-	    "RECURID",
-	    "SEQ",
-	    "STATUS",
-	    "SUMMARY",
-	    "UID",
-	    "URL"
-	];
+	/// but MUST NOT occur more than once
+	enum OptionalUnique = [
+			"CLASS", "COMPLETED", "CREATED", "DESCRIPTION", "DTSTAMP", "DTSTART", "GEO", "LAST-MOD", "LOCATION",
+			"ORGANIZER", "PERCENT", "PRIORITY", "RECURID", "SEQ", "STATUS",
+			"SUMMARY", "UID", "URL"
+		];
 
 	/// either 'due' or 'duration' may appear in
 	/// a 'todoprop', but 'due' and 'duration'
 	/// MUST NOT occur in the same 'todoprop'
-	enum string[] OptionalOr = [ "DUE", "DURATION" ];
+	enum string[] OptionalOr = ["DUE", "DURATION"];
 
-    /// the following are optional,
-    /// and MAY occur more than once
-    enum Optional = [
-	    "ATTACH",
-	    "ATTENDEE",
-	    "CATEGORIES",
-	    "COMMENT",
-	    "CONTACT",
-	    "EXDATE",
-	    "EXRULE",
-	    "RSTATUS",
-	    "RELATED",
-	    "RESOURCES",
-	    "RDATE",
-	    "RRULE"
-	];
+	/// the following are optional,
+	/// and MAY occur more than once
+	enum Optional = [
+			"ATTACH", "ATTENDEE", "CATEGORIES", "COMMENT", "CONTACT", "EXDATE",
+			"EXRULE", "RSTATUS", "RELATED", "RESOURCES", "RDATE", "RRULE"
+		];
 
-    mixin vAccessTpl;
+	mixin vAccessTpl;
 
-    string toString() {
-    	return asString!"VTODO";
-    }
+	string toString()
+	{
+		return asString!"VTODO";
+	}
 }
 
 /// Provide a grouping of component properties that describe a
 /// journal entry.
-struct vJournal {
+struct vJournal
+{
 
 	/// the following are optional,
-    /// but MUST NOT occur more than once
-    enum OptionalUnique = [
-    	"CLASS",
-    	"CREATED",
-    	"DESCRIPTION",
-    	"DTSTART",
-    	"DTSTAMP",
-    	"LAST-MOD",
-    	"ORGANIZER",
-    	"RECURID",
-    	"SEQ",
-    	"STATUS",
-    	"SUMMARY",
-    	"UID",
-    	"URL"
-    ];
-
-    enum string[] OptionalOr= [];
-
-    /// the following are optional,
-    /// and MAY occur more than once
-    enum Optional = [
-	    "ATTACH",
-	    "ATTENDEE",
-	    "CATEGORIES",
-	    "COMMENT",
-	    "CONTACT",
-	    "EXDATE",
-	    "EXRULE",
-	    "RELATED",
-	    "RDATE"
-	    "RRULE",
-	    "RSTATUS"
-    ];
-
-    mixin vAccessTpl;
-
-     string toString() {
-    	return asString!"VJOURNAL";
-    }
-}
-
-struct vFreeBussy {
-	/// the following are optional,
-    /// but MUST NOT occur more than once
-    enum OptionalUnique = [
-	    "CONTACT",
-	    "DTSTART",
-	    "DTEND",
-	    "DURATION",
-	    "DTSTAMP",
-	    "ORGANIZER",
-	    "UID",
-	    "URL"
-	];
+	/// but MUST NOT occur more than once
+	enum OptionalUnique = [
+			"CLASS", "CREATED", "DESCRIPTION", "DTSTART", "DTSTAMP", "LAST-MOD",
+			"ORGANIZER", "RECURID", "SEQ", "STATUS", "SUMMARY", "UID", "URL"
+		];
 
 	enum string[] OptionalOr = [];
 
-     /// the following are optional,
-    /// and MAY occur more than once
-    enum Optional = [
-	    "ATTENDEE",
-	    "COMMENT",
-	    "FREEBUSY",
-	    "RSTATUS"
-	];
+	/// the following are optional,
+	/// and MAY occur more than once
+	enum Optional = [
+			"ATTACH", "ATTENDEE", "CATEGORIES", "COMMENT", "CONTACT", "EXDATE",
+			"EXRULE", "RELATED", "RDATE" "RRULE", "RSTATUS"
+		];
 
-    mixin vAccessTpl;
+	mixin vAccessTpl;
 
-	string toString() {
-		return asString!"VFREEBUSSY";
-    }
+	string toString()
+	{
+		return asString!"VJOURNAL";
+	}
 }
 
-struct vTimezone {
+struct vFreeBussy
+{
+	/// the following are optional,
+	/// but MUST NOT occur more than once
+	enum OptionalUnique = [
+			"CONTACT", "DTSTART", "DTEND", "DURATION", "DTSTAMP", "ORGANIZER", "UID", "URL"
+		];
+
+	enum string[] OptionalOr = [];
+
+	/// the following are optional,
+	/// and MAY occur more than once
+	enum Optional = ["ATTENDEE", "COMMENT", "FREEBUSY", "RSTATUS"];
+
+	mixin vAccessTpl;
+
+	string toString()
+	{
+		return asString!"VFREEBUSSY";
+	}
+}
+
+struct vTimezone
+{
 
 	/// 'tzid' is required, but MUST NOT occur more
 	/// than once
-	enum Required = [ "TZID" ];
+	enum Required = ["TZID"];
 
 	enum string[] Optional = [];
 
 	/// 'last-mod' and 'tzurl' are optional,
 	/// but MUST NOT occur more than once
-	enum OptionalUnique = [
-	    "LAST-MOD",
-	    "TZURL"
-	];
+	enum OptionalUnique = ["LAST-MOD", "TZURL"];
 
 	/// one of 'standardc' or 'daylightc' MUST occur
 	/// and each MAY occur more than once.
-	enum string[] OptionalOr = [ "STANDARDC", "DAYLIGHTC" ];
+	enum string[] OptionalOr = ["STANDARDC", "DAYLIGHTC"];
 
-    mixin vAccessTpl;
+	mixin vAccessTpl;
 
-	string toString() {
-    	return asString!"VTIMEZONE";
-    }
+	string toString()
+	{
+		return asString!"VTIMEZONE";
+	}
 }
 
-struct vAlarm {
+struct vAlarm
+{
 
 	enum string[] OptionalUnique = [];
 
-	enum string[] OptionalOr= [];
+	enum string[] OptionalOr = [];
 
 	enum Optional = [
-		"action",
-		"attach",
-		"description",
-		"trigger",
-		"summary",
-		"attendee",
-		"duration",
-		"repeat",
-		"attach"];
+			"action", "attach", "description", "trigger", "summary",
+			"attendee", "duration", "repeat", "attach"
+		];
 
+	mixin vAccessTpl;
 
-    mixin vAccessTpl;
-
-	string toString() {
-    	return asString!"VALARM";
-    }
+	string toString()
+	{
+		return asString!"VALARM";
+	}
 }
 
-struct iCalendar {
+struct iCalendar
+{
 	vEvent[] vEvents;
 	vTodo[] vTodos;
 	vJournal[] vJournals;
@@ -370,19 +311,24 @@ struct iCalendar {
 	vAlarm[] vAlarms;
 }
 
-vEvent parseVEvent(string[] data) {
+vEvent parseVEvent(string[] data)
+{
 	vEvent ev;
 
-	foreach(item; data) {
+	foreach (item; data)
+	{
 		auto valueSep = item.indexOf(":");
 		auto metaSep = item.indexOf(";");
 		string key;
 		string val;
 
-		if(metaSep != -1 && metaSep < valueSep) {
-			key = item[0..metaSep];
-			val = item[metaSep+1..$];
-		} else {
+		if (metaSep != -1 && metaSep < valueSep)
+		{
+			key = item[0 .. metaSep];
+			val = item[metaSep + 1 .. $];
+		}
+		else
+		{
 			auto row = item.split(":");
 
 			assert(row.length == 2);
@@ -397,8 +343,8 @@ vEvent parseVEvent(string[] data) {
 	return ev;
 }
 
-
-iCalendar parseICalendar(string data) {
+iCalendar parseICalendar(string data)
+{
 	iCalendar calendar;
 
 	auto rows = data.split("\n");
@@ -406,25 +352,28 @@ iCalendar parseICalendar(string data) {
 	string[] tmpData;
 	bool found;
 
-	foreach(row; rows) {
+	foreach (row; rows)
+	{
 		row = row.strip;
 
-		if(row == "BEGIN:VEVENT")
+		if (row == "BEGIN:VEVENT")
 			found = true;
-		else if(row == "END:VEVENT") {
+		else if (row == "END:VEVENT")
+		{
 			found = false;
 			calendar.vEvents ~= parseVEvent(tmpData);
 			tmpData = [];
-		} else if(found)
+		}
+		else if (found)
 			tmpData ~= row;
 	}
 
 	return calendar;
 }
 
-
 @name("Parse VEVENT")
-unittest {
+unittest
+{
 
 	string data = "BEGIN:VCALENDAR
 VERSION:2.0
@@ -449,7 +398,8 @@ END:VCALENDAR";
 }
 
 @name("Parse VEVENT with timezone")
-unittest {
+unittest
+{
 
 	string data = "BEGIN:VCALENDAR
 VERSION:2.0

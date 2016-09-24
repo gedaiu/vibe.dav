@@ -11,6 +11,7 @@ import std.datetime;
 import vibedav.base;
 import vibedav.davresource;
 import vibe.core.file;
+import std.conv;
 
 import vibe.http.server;
 

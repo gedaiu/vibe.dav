@@ -23,6 +23,7 @@ import std.datetime;
 import std.string;
 import std.file;
 import std.path;
+import std.conv;
 
 struct ResourcePropertyValue {
 	enum Mode {

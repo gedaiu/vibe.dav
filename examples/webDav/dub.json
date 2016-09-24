@@ -4,7 +4,7 @@
 	"copyright": "Copyright © 2015, Szabo Bogdan",
 	"authors": ["Szabo Bogdan"],
 	"dependencies": {
-		"vibe-d": "~>0.7.23",
+		"vibe-d": "~>0.7.28",
 		"vibe-dav": {
 			"version": "~>0.2.0",
 			"path": "../.."

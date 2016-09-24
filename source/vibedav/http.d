@@ -18,8 +18,6 @@ import vibe.core.file;
 import vibe.stream.operations;
 import vibe.utils.dictionarylist;
 
-import tested;
-
 debug {
 	import std.stdio;
 }
@@ -38,7 +36,7 @@ string getHeaderValue(HeaderList headers, string name, string defaultValue = "")
 	return value;
 }
 
-@name("basic check for getHeaderValue")
+@("basic check for getHeaderValue")
 unittest {
 	HeaderList list;
 	list["key"] = "value";
@@ -46,14 +44,14 @@ unittest {
 	assert(val == "value");
 }
 
-@name("getHeaderValue with default value")
+@("getHeaderValue with default value")
 unittest {
 	HeaderList list;
 	auto val = getHeaderValue(list, "key", "default");
 	assert(val == "default");
 }
 
-@name("check if getHeaderValue fails")
+@("check if getHeaderValue fails")
 unittest {
 	bool raised = false;
 
@@ -154,7 +152,7 @@ struct DavResponse {
 		}
 	}
 
-	@name("Test opIndex")
+	@("Test opIndex")
 	unittest {
 		DavResponse davResponse = DavResponse.Create;
 		davResponse["test"] = "value";

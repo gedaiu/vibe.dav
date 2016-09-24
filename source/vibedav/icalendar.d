@@ -6,7 +6,6 @@
  */
 module vibedav.icalendar;
 
-import tested;
 import std.string;
 import std.stdio;
 
@@ -134,7 +133,7 @@ struct vEvent
 	}
 }
 
-@name("Set unique property")
+@("Set unique property")
 unittest
 {
 	vEvent event;
@@ -144,7 +143,7 @@ unittest
 	assert(event.toString == "BEGIN:VEVENT\nCLASS:value\nEND:VEVENT");
 }
 
-@name("Set unique property twice throw Exception")
+@("Set unique property twice throw Exception")
 unittest
 {
 	vEvent event;
@@ -165,7 +164,7 @@ unittest
 	assert(event.toString == "BEGIN:VEVENT\nCLASS:value1\nEND:VEVENT");
 }
 
-@name("Set optional properties")
+@("Set optional properties")
 unittest
 {
 	vEvent event;
@@ -371,7 +370,7 @@ iCalendar parseICalendar(string data)
 	return calendar;
 }
 
-@name("Parse VEVENT")
+@("Parse VEVENT")
 unittest
 {
 
@@ -397,7 +396,7 @@ END:VCALENDAR";
 	assert(parsed.vEvents[0]["DTSTART"] == "20150401T000000Z");
 }
 
-@name("Parse VEVENT with timezone")
+@("Parse VEVENT with timezone")
 unittest
 {
 

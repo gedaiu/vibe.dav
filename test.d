@@ -2,7 +2,6 @@ import dub_test_root;
 
 import std.stdio;
 import core.runtime;
-import testedatom;
 
 shared bool result;
 
@@ -18,7 +17,6 @@ int main() {
 }
 
 shared static this() {
-	import tested;
 	import core.runtime;
 	import std.exception;
 	Runtime.moduleUnitTester = () => true;

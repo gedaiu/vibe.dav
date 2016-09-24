@@ -38,8 +38,6 @@ static if (__traits(compiles, { import std.algorithm.comparison : max; }))
 else
     import std.algorithm;
 
-import tested: testName = name;
-
 /// Compute a file etag
 string eTag(string path) {
 	import std.digest.crc;

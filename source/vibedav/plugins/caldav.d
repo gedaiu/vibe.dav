@@ -27,8 +27,6 @@ import std.typecons;
 import std.uri;
 import std.uuid;
 
-import tested;
-
 private bool matchPluginUrl(Path path, string username) {
 	if(path.length < 2) {
 		return false;

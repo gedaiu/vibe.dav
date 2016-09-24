@@ -32,9 +32,6 @@ import std.uuid;
 
 import core.thread;
 
-import tested;
-
-
 class DavPropException : DavException {
 	///
 	this(HTTPStatus status, string msg, string mime = "plain/text", string file = __FILE__, size_t line = __LINE__, Throwable next = null)
@@ -390,20 +387,20 @@ DavProp[] getTagChilds(DavProp[] list, string key) {
 	return result;
 }
 
-@name("string prop")
+@("string prop")
 unittest {
 	auto prop = new DavProp("value");
 	assert(prop.to!string == "value");
 }
 
-@name("tag prop")
+@("tag prop")
 unittest {
 	auto prop = new DavProp;
 	prop["name"] = "value";
 	assert(prop.toString == `<name>value</name>`);
 }
 
-@name("check if tags can be accessed from other references")
+@("check if tags can be accessed from other references")
 unittest {
 	DavProp properties = new DavProp;
 	auto prop = new DavProp("value");
@@ -415,7 +412,7 @@ unittest {
 	assert(prop["sub"] == subProp);
 }
 
-@name("remove child tags")
+@("remove child tags")
 unittest {
 	DavProp properties = new DavProp;
 
@@ -428,7 +425,7 @@ unittest {
 	assert(properties.length == 2);
 }
 
-@name("filter tags by tag name")
+@("filter tags by tag name")
 unittest {
 	DavProp properties = new DavProp;
 	auto prop1 = new DavProp;
@@ -446,7 +443,7 @@ unittest {
 	assert([ properties ].getTagChilds("prop") == [prop1, prop2]);
 }
 
-@name("set tag value property")
+@("set tag value property")
 unittest {
 	auto prop = new DavProp;
 	prop["name"] = "value";
@@ -455,7 +452,7 @@ unittest {
 	assert(prop.toString == `<name>value2</name>`);
 }
 
-@name("set namespace attr")
+@("set namespace attr")
 unittest {
 	auto prop = new DavProp;
 	prop["name"] = "value";
@@ -464,7 +461,7 @@ unittest {
 	assert(prop.toString == `<name xmlns="ns">value</name>`);
 }
 
-@name("set a tag namesapace prefix")
+@("set a tag namesapace prefix")
 unittest {
 	auto prop = new DavProp;
 	prop["name"] = "";
@@ -473,7 +470,7 @@ unittest {
 	assert(prop.toString == `<name xmlns:D="DAV:"/>`);
 }
 
-@name("get tag prefix")
+@("get tag prefix")
 unittest {
 	auto prop = new DavProp;
 	prop["name"] = "";
@@ -483,7 +480,7 @@ unittest {
 	assert(prop["name"]["D:propname"].prefix == "D");
 }
 
-@name("add a tag with an unknown ns prefix")
+@("add a tag with an unknown ns prefix")
 unittest {
 	auto prop = new DavProp;
 	prop["name"] = "";
@@ -500,7 +497,7 @@ unittest {
 	assert(raised);
 }
 
-@name("add same name tag with different ns")
+@("add same name tag with different ns")
 unittest {
 	auto prop = new DavProp;
 	auto prop1 = new DavProp;
@@ -521,7 +518,7 @@ unittest {
 	assert(prop.length == 2);
 }
 
-@name("get a namespace name from a prefixed tag")
+@("get a namespace name from a prefixed tag")
 unittest {
 	auto prop = new DavProp;
 	prop.namespaces["D"] = "DAV:";
@@ -532,7 +529,7 @@ unittest {
 	assert(prop["D:name"]["D:val"].namespace == "DAV:");
 }
 
-@name("create FromKey")
+@("create FromKey")
 unittest {
 	auto p = DavProp.FromKey("A:DAV:", "value");
 
@@ -541,7 +538,7 @@ unittest {
 	assert(p.value == "value");
 }
 
-@name("create FromKeyAndList")
+@("create FromKeyAndList")
 unittest {
 	string[][string] value;
 	value["href:DAV:"] = [];
@@ -552,7 +549,7 @@ unittest {
 	assert(p.toString == `<A xmlns="DAV:"><href xmlns="DAV:">value</href></A>`);
 }
 
-@name("attributes to string")
+@("attributes to string")
 unittest {
 	auto p = new DavProp("DAV:", "A");
 	p.attribute["name"] = "value";
@@ -813,13 +810,13 @@ DavProp parseXMLPropNode(string xmlNodeText, DavProp parent, ref ulong end) {
 	return node;
 }
 
-@name("parse a string without any tags")
+@("parse a string without any tags")
 unittest {
 	auto prop = parseXMLProp("value");
 	assert(prop.value == "value");
 }
 
-@name("parse a string with a tag")
+@("parse a string with a tag")
 unittest {
 	auto prop = parseXMLProp(`<name>value</name>`)[0];
 	assert(prop.value == "value");
@@ -827,7 +824,7 @@ unittest {
 	assert(prop.toString == "<name>value</name>");
 }
 
-@name("parse a string without imbricated tags")
+@("parse a string without imbricated tags")
 unittest {
 	auto prop = parseXMLProp(`<prop1>val1</prop1><prop2>val2</prop2>`);
 	assert(prop["prop1"].value == "val1");
@@ -835,7 +832,7 @@ unittest {
 	assert(prop.toString == "<prop1>val1</prop1><prop2>val2</prop2>");
 }
 
-@name("parse a string with imbricated tags")
+@("parse a string with imbricated tags")
 unittest {
 	auto prop = parseXMLProp(`<name><name>value</name></name>`)[0];
 
@@ -844,7 +841,7 @@ unittest {
 	assert(prop.toString == "<name><name>value</name></name>");
 }
 
-@name("check invalid namespaces")
+@("check invalid namespaces")
 unittest {
 	auto prop = parseXMLProp(`<d:prop1>val1</d:prop1>`)[0];
 
@@ -856,75 +853,75 @@ unittest {
 	assert(raised);
 }
 
-@name("check valid namespaces")
+@("check valid namespaces")
 unittest {
 	auto prop = parseXMLProp(`<cat xmlns:d="DAV:"><d:prop>val</d:prop></cat>`);
 	prop.checkNamespacePrefixes;
 	assert(prop.toString == `<cat xmlns:d="DAV:"><d:prop>val</d:prop></cat>`);
 }
 
-@name("parse xml attribute")
+@("parse xml attribute")
 unittest {
 	auto prop = parseXMLProp(`<cat xmlns="DAV:"></cat>`)[0];
 	assert(prop.namespaceAttr == `DAV:`);
 }
 
-@name("normalize xml string")
+@("normalize xml string")
 unittest {
 	auto text = normalize(`< cat      xmlns   = "DAV:"    >      < / cat  >`);
 	assert(text == `<cat xmlns="DAV:"></cat>`);
 }
 
-@name("normalize `/` and `<` in attr values")
+@("normalize `/` and `<` in attr values")
 unittest {
 	auto text = normalize(`< cat      xmlns   = " /  < "    >      < / cat  >`);
 	assert(text == `<cat xmlns=" /  < "></cat>`);
 }
 
-@name("access nodes without passing the ns")
+@("access nodes without passing the ns")
 unittest {
 	auto prop = parseXMLProp(`<d:tag1 xmlns:d="DAV:"><d:tag2>value</d:tag2></d:tag1>`)[0];
 	assert(prop.tagName == "tag1");
 	assert(prop["tag2"].value == "value");
 }
 
-@name("parse self closing tags")
+@("parse self closing tags")
 unittest {
 	auto prop = parseXMLProp(`<a/>`)[0];
 	assert(prop.tagName == "a");
 }
 
-@name("check ?xml tag parsing")
+@("check ?xml tag parsing")
 unittest {
 	auto prop = parseXMLProp(`<?xml><propfind xmlns="DAV:"><prop><getcontentlength xmlns="DAV:"/></prop></propfind>`);
 	assert(prop.toString == `<?xml><propfind xmlns="DAV:"><prop><getcontentlength xmlns="DAV:"/></prop></propfind>`);
 }
 
-@name("check if the parsing fails to check the parents")
+@("check if the parsing fails to check the parents")
 unittest {
 	auto prop = parseXMLProp(`<d:a xmlns:d="DAV:"><d:b><d:c/></d:b></d:a>`);
 	assert(prop.toString == `<d:a xmlns:d="DAV:"><d:b><d:c/></d:b></d:a>`);
 }
 
-@name("check child names with similar name")
+@("check child names with similar name")
 unittest {
 	auto prop = parseXMLProp(`<prop><prop0/></prop>`);
 	assert(prop.toString == `<prop><prop0/></prop>`);
 }
 
-@name("allow to have childrens with the same tag name")
+@("allow to have childrens with the same tag name")
 unittest {
 	auto prop = parseXMLProp(`<a><b>c1</b><b>c2</b></a>`);
 	assert(prop.toString == `<a><b>c1</b><b>c2</b></a>`);
 }
 
-@name("value given for tag with null ns")
+@("value given for tag with null ns")
 unittest {
 	auto prop = parseXMLProp(`<test xmlns="DAV:"><nonamespace xmlns="">randomvalue</nonamespace></test>`);
 	assert(prop.toString == `<test xmlns="DAV:"><nonamespace xmlns="">randomvalue</nonamespace></test>`);
 }
 
-@name("replace namespaces with prefixes")
+@("replace namespaces with prefixes")
 unittest {
 	auto prop = parseXMLProp(`<a xmlns:D="DAV:"><b xmlns="DAV:">randomvalue</b></a>`);
 	assert(prop.toString == `<a xmlns:D="DAV:"><D:b>randomvalue</D:b></a>`);

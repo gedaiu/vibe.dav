@@ -30,7 +30,6 @@ import std.stdio;
 import std.typecons;
 import std.uri;
 import std.algorithm.sorting, std.algorithm.setops;
-import tested;
 
 class DavStorage {
 	static {
@@ -96,7 +95,7 @@ Path getFilePath(Path baseUrlPath, Path basePath, URL url) {
 	return basePath ~ filePath;
 }
 
-@name("Basic getFilePath")
+@("Basic getFilePath")
 unittest {
 	auto path = getFilePath(Path("test/"), Path("/base/"), URL("http://127.0.0.1/test/file.txt"));
 	assert(path.toString == "/base/file.txt");

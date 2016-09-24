@@ -6,8 +6,6 @@
  */
 module vibedav.ifheader;
 
-import tested;
-
 import vibedav.parser;
 
 import std.stdio;
@@ -166,7 +164,7 @@ struct IfHeader {
 	}
 }
 
-@name("No-Tag-List")
+@("No-Tag-List")
 unittest {
 	auto tag = IfHeader.parse("(<urn:uuid:150852e2-3847-42d5-8cbe-0f4f296f26cf>)");
 
@@ -174,7 +172,7 @@ unittest {
 	assert(tag.has("", "urn:uuid:150852e2-3847-42d5-8cbe-0f4f296f26cf"));
 }
 
-@name("Tagged-List")
+@("Tagged-List")
 unittest {
 	auto tag = IfHeader.parse("<http://example.com/locked/> (<urn:uuid:150852e2-3847-42d5-8cbe-0f4f296f26cf>) (<other>)");
 
@@ -183,7 +181,7 @@ unittest {
 	assert(tag.has("http://example.com/locked/", "other"));
 }
 
-@name("Tagged-List")
+@("Tagged-List")
 unittest {
 	auto tag = IfHeader.parse("<http://example.com/locked/> (<urn:uuid:150852e2-3847-42d5-8cbe-0f4f296f26cf>)");
 
@@ -191,7 +189,7 @@ unittest {
 	assert(tag.has("http://example.com/locked/", "urn:uuid:150852e2-3847-42d5-8cbe-0f4f296f26cf"));
 }
 
-@name("multiple conditions")
+@("multiple conditions")
 unittest {
 	auto tag = IfHeader.parse("(<urn:uuid:181d4fae-7d8c-11d0-a765-00a0c91e6bf2>) (Not <DAV:no-lock>)");
 
@@ -202,7 +200,7 @@ unittest {
 	assert(!tag.hasNot("", "urn:uuid:181d4fae-7d8c-11d0-a765-00a0c91e6bf2"));
 }
 
-@name("etag conditions")
+@("etag conditions")
 unittest {
 	auto tag = IfHeader.parse(`(<DAV:no-lock> ["C8E30A4F4684AB4A5053F6C1ACBA1023"])`);
 
